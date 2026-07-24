@@ -28,6 +28,8 @@ export interface DemoEntry {
   readonly ready: boolean;
   /** The React component that renders the demo, when ready. */
   readonly Component?: ComponentType;
+  /** Render inside a vertically scrollable body (for text/code pages, not canvases). */
+  readonly scroll?: boolean;
 }
 
 /**
@@ -42,6 +44,7 @@ export const DEMOS: readonly DemoEntry[] = [
     tagline: 'Minimal, copy-paste snippets for every core pattern.',
     ready: true,
     Component: CookbookDemo,
+    scroll: true,
   },
   {
     slug: 'i-dashboard',

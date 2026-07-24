@@ -268,6 +268,13 @@ button {
 .demo__body {
   flex: 1;
   min-height: 0;
+  position: relative;
+}
+
+/* Text/code pages scroll inside the body instead of filling it with a canvas. */
+.demo__body--scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .coming-soon {
@@ -1048,12 +1055,10 @@ button {
    Code cookbook
    ========================================================================== */
 .cookbook {
-  height: 100%;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 18px;
-  padding-right: 8px;
+  padding: 2px 4px 8px;
 }
 
 .cookbook__intro {
@@ -1122,7 +1127,7 @@ button {
 .code {
   position: relative;
   border-top: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 60%, #000 6%);
+  background: var(--bg-2);
 }
 
 .copy-btn {

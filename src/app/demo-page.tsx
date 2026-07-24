@@ -20,7 +20,7 @@ export function DemoPage(): ReactNode {
         <p className="demo__tagline">{demo.tagline}</p>
       </header>
 
-      <div className="demo__body">
+      <div className={`demo__body${demo.scroll === true ? ' demo__body--scroll' : ''}`}>
         {demo.ready && demo.Component ? <demo.Component /> : <ComingSoon />}
       </div>
     </div>

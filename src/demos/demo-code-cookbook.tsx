@@ -1,5 +1,8 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { Highlight, themes } from 'prism-react-renderer';
+
+import { useTheme } from '../app/theme.tsx';
 
 /** One documented snippet: a title, a one-line why, the code, and an optional live demo. */
 interface Snippet {
@@ -204,6 +207,27 @@ resetCells(nextDataset);`,
   },
 ];
 
+/** TSX code with Prism syntax highlighting, themed to match the app. */
+function CodeBlock({ code }: Readonly<{ code: string }>): ReactNode {
+  const { theme } = useTheme();
+  const prismTheme = theme === 'dark' ? themes.oneDark : themes.oneLight;
+  return (
+    <Highlight code={code} language="tsx" theme={prismTheme}>
+      {({ tokens, getLineProps, getTokenProps }) => (
+        <pre className="code__pre" style={{ background: 'transparent' }}>
+          {tokens.map((line, lineIndex) => (
+            <div key={lineIndex} {...getLineProps({ line })}>
+              {line.map((token, tokenIndex) => (
+                <span key={tokenIndex} {...getTokenProps({ token })} />
+              ))}
+            </div>
+          ))}
+        </pre>
+      )}
+    </Highlight>
+  );
+}
+
 function SnippetCard({ item }: Readonly<{ item: Snippet }>): ReactNode {
   const [copied, setCopied] = useState(false);
 
@@ -231,9 +255,7 @@ function SnippetCard({ item }: Readonly<{ item: Snippet }>): ReactNode {
         <button type="button" className="copy-btn" onClick={copy}>
           {copied ? 'Copied ✓' : 'Copy'}
         </button>
-        <pre className="code__pre">
-          <code>{item.code}</code>
-        </pre>
+        <CodeBlock code={item.code} />
       </div>
     </section>
   );
