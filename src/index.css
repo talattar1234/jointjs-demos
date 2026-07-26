@@ -316,6 +316,11 @@ button {
   position: relative;
 }
 
+/* Toggle node labels with a single class flip — no per-cell React re-render. */
+.stage__canvas.labels-hidden .scale-node-label {
+  display: none;
+}
+
 .toolbar {
   flex: none;
   display: flex;

@@ -8,8 +8,6 @@ export const SCALE_MAX = 200_000;
 export const SCALE_WARN = 20_000;
 /** Only auto-fit the whole field for counts small enough to render at once. */
 export const SCALE_FIT_LIMIT = 4_000;
-/** Below this, each node also gets a text label (labels are costly at scale). */
-export const SCALE_LABEL_LIMIT = 2_000;
 
 /** Fixed node geometry, shared by the generator and the renderer. */
 export const NODE_WIDTH = 44;
@@ -22,8 +20,8 @@ export interface ScaleNodeData {
   readonly [key: string]: unknown;
   /** Hue used to color the node, spread via the golden angle for variety. */
   readonly hue: number;
-  /** Optional label — only present for small graphs. */
-  readonly label?: string;
+  /** Per-node label (its index). Always present; visibility is toggled in the UI. */
+  readonly label: string;
 }
 
 const GOLDEN_ANGLE = 137.508;
@@ -35,15 +33,12 @@ const GOLDEN_ANGLE = 137.508;
  */
 export function buildScaleCells(count: number): CellRecord<ScaleNodeData>[] {
   const columns = Math.max(1, Math.round(Math.sqrt((count * 16) / 9)));
-  const withLabels = count <= SCALE_LABEL_LIMIT;
   const cells: CellRecord<ScaleNodeData>[] = new Array(count);
 
   for (let index = 0; index < count; index += 1) {
     const column = index % columns;
     const row = (index - column) / columns;
-    const data: ScaleNodeData = withLabels
-      ? { hue: (index * GOLDEN_ANGLE) % 360, label: String(index) }
-      : { hue: (index * GOLDEN_ANGLE) % 360 };
+    const data: ScaleNodeData = { hue: (index * GOLDEN_ANGLE) % 360, label: String(index) };
     cells[index] = {
       id: `n${index}`,
       type: 'element',
