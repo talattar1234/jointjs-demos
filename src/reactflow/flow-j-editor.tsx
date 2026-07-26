@@ -12,11 +12,13 @@ import {
 import {
   addEdge,
   Handle,
+  NodeResizer,
   Position,
   ReactFlowProvider,
   useEdgesState,
   useNodesState,
   useOnSelectionChange,
+  useReactFlow,
   type Connection,
   type Edge,
   type Node,
@@ -30,17 +32,42 @@ import { EDGE_DEFAULTS } from './adapt.ts';
 
 interface EditorData extends Record<string, unknown> {
   readonly label: string;
+  /** Rotation in degrees, clockwise. Applied as a CSS transform — see {@link EditorNodeView}. */
+  readonly angle: number;
 }
 
 const NODE_W = 150;
 const NODE_H = 56;
+/** Floor for interactive resizing, matching the other two tabs. */
+const MIN_W = 96;
+const MIN_H = 40;
+/** How far above the node's top edge the rotate handle floats, in px. */
+const ROTATE_HANDLE_OFFSET = 28;
+/** Rotation snaps to this many degrees unless Shift is held. */
+const SNAP_DEGREES = 15;
 
 const INITIAL_NODES: Node<EditorData>[] = [
-  { id: 'a', type: 'editor', position: { x: 80, y: 80 }, data: { label: 'Ingest' }, style: { width: NODE_W, height: NODE_H } },
-  { id: 'b', type: 'editor', position: { x: 360, y: 80 }, data: { label: 'Transform' }, style: { width: NODE_W, height: NODE_H } },
-  { id: 'c', type: 'editor', position: { x: 360, y: 240 }, data: { label: 'Store' }, style: { width: NODE_W, height: NODE_H } },
+  { id: 'a', type: 'editor', position: { x: 80, y: 80 }, data: { label: 'Ingest', angle: 0 }, width: NODE_W, height: NODE_H },
+  { id: 'b', type: 'editor', position: { x: 360, y: 80 }, data: { label: 'Transform', angle: 0 }, width: NODE_W, height: NODE_H },
+  { id: 'c', type: 'editor', position: { x: 360, y: 240 }, data: { label: 'Store', angle: 0 }, width: NODE_W, height: NODE_H },
 ];
 const INITIAL_EDGES: Edge[] = [{ id: 'a->b', source: 'a', target: 'b', ...EDGE_DEFAULTS }];
+
+/**
+ * The clockwise angle, in degrees, that points from `center` to `point` — offset
+ * so that "pointer directly above the center" reads as 0°, which is where the
+ * rotate handle sits at rest. Snaps to {@link SNAP_DEGREES} unless Shift is held
+ * (GoJS's convention, mirrored here so the three tabs feel the same).
+ */
+function angleFromCenter(
+  center: { readonly x: number; readonly y: number },
+  point: { readonly x: number; readonly y: number },
+  isFreeAngle: boolean
+): number {
+  const degrees = (Math.atan2(point.y - center.y, point.x - center.x) * 180) / Math.PI + 90;
+  const wrapped = ((degrees % 360) + 360) % 360;
+  return isFreeAngle ? Math.round(wrapped) : Math.round(wrapped / SNAP_DEGREES) * SNAP_DEGREES;
+}
 
 /* -------------------------------------------------------------------------- */
 /* Inline-edit context                                                         */
@@ -51,6 +78,9 @@ interface EditorContextValue {
   readonly beginEdit: (id: string) => void;
   readonly commit: (id: string, label: string) => void;
   readonly cancel: () => void;
+  /** Push the current graph onto the undo stack, before a gesture mutates it. */
+  readonly record: () => void;
+  readonly setAngle: (id: string, angle: number) => void;
 }
 
 const EditorContext = createContext<EditorContextValue | null>(null);
@@ -99,20 +129,102 @@ function EditInput({
   );
 }
 
-function EditorNodeView({ id, data }: NodeProps<Node<EditorData>>): ReactNode {
-  const { editingId, commit, cancel } = useEditor();
-  const isEditing = editingId === id;
+/**
+ * The rotate grip. React Flow ships `NodeResizer` but has no rotation tool, so
+ * this is hand-rolled: pointer capture on a small round handle, and the angle
+ * read straight off the pointer's position relative to the node's center in flow
+ * coordinates (so it's zoom- and pan-independent).
+ */
+function RotateHandle({ nodeId }: Readonly<{ nodeId: string }>): ReactNode {
+  const { getInternalNode, screenToFlowPosition } = useReactFlow();
+  const { record, setAngle } = useEditor();
+  const isRotating = useRef(false);
+
+  const handlePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      // Keep the gesture off the pane: React Flow would otherwise start a node drag.
+      event.stopPropagation();
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      isRotating.current = true;
+      record();
+    },
+    [record]
+  );
+
+  const handlePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!isRotating.current) {
+        return;
+      }
+      const node = getInternalNode(nodeId);
+      if (node === undefined) {
+        return;
+      }
+      const { positionAbsolute } = node.internals;
+      const center = {
+        x: positionAbsolute.x + (node.measured.width ?? 0) / 2,
+        y: positionAbsolute.y + (node.measured.height ?? 0) / 2,
+      };
+      const pointer = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      setAngle(nodeId, angleFromCenter(center, pointer, event.shiftKey));
+    },
+    [getInternalNode, nodeId, screenToFlowPosition, setAngle]
+  );
+
+  const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    isRotating.current = false;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  }, []);
 
   return (
-    <div className="rf-ednode">
-      <Handle type="target" position={Position.Left} className="rf-port" />
-      {isEditing ? (
-        <EditInput initial={data.label} onCommit={(value) => commit(id, value)} onCancel={cancel} />
-      ) : (
-        <span className="rf-ednode__text">{data.label}</span>
-      )}
-      <Handle type="source" position={Position.Right} className="rf-port" />
-    </div>
+    <div
+      className="rf-rotate-handle nodrag nopan"
+      style={{ top: -ROTATE_HANDLE_OFFSET }}
+      title="Drag to rotate (hold Shift for a free angle)"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+    />
+  );
+}
+
+/**
+ * Resizing is React Flow's own `NodeResizer`; rotation is not — the library has
+ * no rotation tool, so `data.angle` is applied as a CSS transform on the card.
+ *
+ * That transform is invisible to React Flow itself: the node's hit area,
+ * selection outline, resizer frame and floating-edge endpoints all keep using
+ * the un-rotated box. Rotation here is presentational, where the GoJS tab
+ * rotates the real geometry.
+ */
+function EditorNodeView({ id, data, selected }: NodeProps<Node<EditorData>>): ReactNode {
+  const { editingId, commit, cancel, record } = useEditor();
+  const isEditing = editingId === id;
+  const isSelected = selected === true;
+
+  return (
+    <>
+      <NodeResizer
+        isVisible={isSelected}
+        minWidth={MIN_W}
+        minHeight={MIN_H}
+        onResizeStart={record}
+        handleClassName="rf-resize-handle"
+        lineClassName="rf-resize-line"
+      />
+      <div className="rf-ednode" style={{ transform: `rotate(${data.angle}deg)` }}>
+        <Handle type="target" position={Position.Left} className="rf-port" />
+        {isEditing ? (
+          <EditInput initial={data.label} onCommit={(value) => commit(id, value)} onCancel={cancel} />
+        ) : (
+          <span className="rf-ednode__text">{data.label}</span>
+        )}
+        <Handle type="source" position={Position.Right} className="rf-port" />
+        {isSelected && <RotateHandle nodeId={id} />}
+      </div>
+    </>
   );
 }
 
@@ -196,6 +308,11 @@ function EditorStage(): ReactNode {
         setEditingId(null);
       },
       cancel: () => setEditingId(null),
+      record,
+      setAngle: (id, angle) =>
+        setNodes((previous) =>
+          previous.map((node) => (node.id === id ? { ...node, data: { ...node.data, angle } } : node))
+        ),
     }),
     [editingId, record, setNodes]
   );
@@ -219,8 +336,9 @@ function EditorStage(): ReactNode {
         id,
         type: 'editor',
         position: { x: 100 + (index % 4) * 60, y: 380 + Math.floor(index / 4) * 40 },
-        data: { label: `Node ${index}` },
-        style: { width: NODE_W, height: NODE_H },
+        data: { label: `Node ${index}`, angle: 0 },
+        width: NODE_W,
+        height: NODE_H,
         selected: true,
       },
     ]);
@@ -254,7 +372,10 @@ function EditorStage(): ReactNode {
             </button>
           </div>
           <span className="hint">
-            Drag a port (○) to another node to connect · double-click a node to rename · click to select
+            Drag a port (○) to another node to connect · double-click a node to rename · drag an edge
+            handle to resize (React Flow's <code>NodeResizer</code>), the round grip above a node to
+            rotate (Shift = free angle) · rotation is a CSS transform, so the hit box and edges stay
+            axis-aligned
           </span>
         </div>
         <div className="stage__canvas">
@@ -276,7 +397,10 @@ function EditorStage(): ReactNode {
   );
 }
 
-/** Demo j (React Flow) — connect by dragging ports, rename inline, undo/redo. */
+/**
+ * Demo j (React Flow) — connect by dragging ports, rename inline, resize,
+ * rotate, undo/redo.
+ */
 export function FlowEditorDemo(): ReactNode {
   return (
     <ReactFlowProvider>

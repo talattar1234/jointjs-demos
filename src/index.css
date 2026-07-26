@@ -1373,6 +1373,40 @@ button {
   background: var(--accent-2);
 }
 
+/* NodeResizer, restyled from its stock blue onto the app's tokens */
+.react-flow__resize-control.handle.rf-resize-handle {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--panel);
+  border: 1.5px solid var(--accent);
+}
+
+.react-flow__resize-control.line.rf-resize-line {
+  border-color: var(--accent);
+  border-width: 1px;
+  opacity: 0.55;
+}
+
+/* Rotate grip — hand-rolled, React Flow has no rotation tool */
+.rf-rotate-handle {
+  position: absolute;
+  left: 50%;
+  width: 11px;
+  height: 11px;
+  margin-left: -5.5px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 1.5px solid var(--accent);
+  cursor: grab;
+  touch-action: none;
+}
+
+.rf-rotate-handle:active {
+  cursor: grabbing;
+  background: var(--accent);
+}
+
 /* Service card (dashboard) — reuses the shared .svc__* inner classes */
 /* Handles exist only so React Flow will instantiate the floating edges; the
    floating router computes its own endpoints, so keep them invisible. */

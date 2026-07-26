@@ -11,16 +11,21 @@ import {
 } from 'react';
 import {
   GraphProvider,
+  selectElementAngle,
+  selectElementPosition,
+  selectElementSize,
+  useCell,
   useCellId,
   useGraph,
   useMarkup,
   useOnGraphEvents,
+  usePaper,
   type CellRecord,
   type ElementRecord,
   type GraphJSON,
   type RenderElement,
 } from '@joint/react';
-import type { dia } from '@joint/core';
+import type { dia, g } from '@joint/core';
 
 import { DiagramCanvas } from '../components/diagram-canvas.tsx';
 import { SelectionLayer, SelectionProvider, useSelection } from '../hooks/use-selection.tsx';
@@ -32,6 +37,15 @@ interface EditorData {
 
 const NODE_W = 150;
 const NODE_H = 56;
+/** Floor for interactive resizing, matching the other two tabs. */
+const MIN_W = 96;
+const MIN_H = 40;
+/** Side of a square resize handle. */
+const HANDLE_SIZE = 8;
+/** How far above the node's top edge the rotate handle floats. */
+const ROTATE_OFFSET = 26;
+/** Rotation snaps to this many degrees unless Shift is held. */
+const SNAP_DEGREES = 15;
 
 const initialCells: CellRecord<EditorData>[] = [
   { id: 'a', type: 'element', position: { x: 80, y: 80 }, size: { width: NODE_W, height: NODE_H }, data: { label: 'Ingest' } },
@@ -145,6 +159,8 @@ function useGraphHistory(): History {
     'change:source': schedule,
     'change:target': schedule,
     'change:position': schedule,
+    'change:size': schedule,
+    'change:angle': schedule,
     'change:data': schedule,
   });
 
@@ -177,6 +193,281 @@ function useGraphHistory(): History {
     canUndo: past.current.length > 0,
     canRedo: future.current.length > 0,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Resize + rotate handles                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Rotate a vector clockwise by `degrees` — SVG's positive direction, since the
+ * y axis points down. Passing `-angle` converts a paper-space delta into the
+ * element's own unrotated frame.
+ */
+function rotateVector(x: number, y: number, degrees: number): { readonly x: number; readonly y: number } {
+  const radians = (degrees * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return { x: x * cos - y * sin, y: x * sin + y * cos };
+}
+
+/**
+ * The clockwise angle, in degrees, from `center` to `point`, offset so that
+ * "pointer directly above the center" reads as 0° — where the rotate handle sits
+ * at rest. Snaps to {@link SNAP_DEGREES} unless Shift is held, which is GoJS's
+ * convention (that tab can't invert it, so this one matches it).
+ */
+function angleFromCenter(
+  center: { readonly x: number; readonly y: number },
+  point: { readonly x: number; readonly y: number },
+  isFreeAngle: boolean
+): number {
+  const degrees = (Math.atan2(point.y - center.y, point.x - center.x) * 180) / Math.PI + 90;
+  const wrapped = ((degrees % 360) + 360) % 360;
+  return isFreeAngle ? Math.round(wrapped) : Math.round(wrapped / SNAP_DEGREES) * SNAP_DEGREES;
+}
+
+/** Which corner a resize handle drags: `-1` is the left/top edge, `1` right/bottom. */
+interface Corner {
+  readonly sx: -1 | 1;
+  readonly sy: -1 | 1;
+  readonly cursor: string;
+}
+
+const CORNERS: readonly Corner[] = [
+  { sx: -1, sy: -1, cursor: 'nwse-resize' },
+  { sx: 1, sy: -1, cursor: 'nesw-resize' },
+  { sx: -1, sy: 1, cursor: 'nesw-resize' },
+  { sx: 1, sy: 1, cursor: 'nwse-resize' },
+];
+
+/** Geometry captured when a handle drag starts, so each frame is absolute, not incremental. */
+interface DragStart {
+  readonly pointer: g.Point;
+  readonly position: dia.Point;
+  readonly size: dia.Size;
+  readonly angle: number;
+}
+
+/**
+ * Wire a drag gesture onto one SVG handle, and hand each frame the pointer in
+ * paper coordinates.
+ *
+ * The listeners are native and bound to the handle itself, which matters:
+ * JointJS binds its own `mousedown` on the paper element, and that sits *between*
+ * the handle and React's delegated root listener — so a React `onPointerDown`
+ * would fire too late to stop the paper from starting an element drag. Blocking
+ * `mousedown`/`touchstart` at the target is what keeps the two apart. (`@joint/plus`
+ * ships a FreeTransform widget for this; it's off-limits here.)
+ */
+function useHandleDrag(
+  onDragStart: () => void,
+  onDrag: (pointer: g.Point, event: PointerEvent) => void
+): (node: SVGElement | null) => void {
+  const { paper } = usePaper();
+
+  return useCallback(
+    (node: SVGElement | null) => {
+      if (node === null || paper === null) {
+        return;
+      }
+      const toPaper = (event: PointerEvent): g.Point =>
+        paper.clientToLocalPoint({ x: event.clientX, y: event.clientY });
+
+      const swallow = (event: Event): void => event.stopPropagation();
+
+      const onPointerMove = (event: PointerEvent): void => onDrag(toPaper(event), event);
+
+      const onPointerUp = (event: PointerEvent): void => {
+        node.releasePointerCapture(event.pointerId);
+        node.removeEventListener('pointermove', onPointerMove);
+        node.removeEventListener('pointerup', onPointerUp);
+        node.removeEventListener('pointercancel', onPointerUp);
+      };
+
+      const onPointerDown = (event: PointerEvent): void => {
+        event.stopPropagation();
+        event.preventDefault();
+        node.setPointerCapture(event.pointerId);
+        onDragStart();
+        node.addEventListener('pointermove', onPointerMove);
+        node.addEventListener('pointerup', onPointerUp);
+        node.addEventListener('pointercancel', onPointerUp);
+      };
+
+      node.addEventListener('pointerdown', onPointerDown);
+      node.addEventListener('mousedown', swallow);
+      node.addEventListener('touchstart', swallow);
+
+      return () => {
+        node.removeEventListener('pointerdown', onPointerDown);
+        node.removeEventListener('mousedown', swallow);
+        node.removeEventListener('touchstart', swallow);
+      };
+    },
+    [paper, onDrag, onDragStart]
+  );
+}
+
+/**
+ * One corner grip. Resizing keeps the opposite corner planted, which for a
+ * rotated element means the pointer delta has to be taken into the element's own
+ * frame, and the resulting center shift taken back out of it.
+ */
+function ResizeHandle({
+  corner,
+  data,
+  width,
+  height,
+  geometry,
+}: Readonly<{
+  corner: Corner;
+  data: EditorData;
+  width: number;
+  height: number;
+  geometry: React.RefObject<DragStart | null>;
+}>): ReactNode {
+  const id = useCellId();
+  const { setCell } = useGraph<ElementRecord<EditorData>>();
+  const start = useRef<DragStart | null>(null);
+
+  const onDragStart = useCallback(() => {
+    start.current = geometry.current;
+  }, [geometry]);
+
+  const onDrag = useCallback(
+    (pointer: g.Point) => {
+      const from = start.current;
+      if (from === null) {
+        return;
+      }
+      const local = rotateVector(pointer.x - from.pointer.x, pointer.y - from.pointer.y, -from.angle);
+      const nextWidth = Math.max(MIN_W, from.size.width + corner.sx * local.x);
+      const nextHeight = Math.max(MIN_H, from.size.height + corner.sy * local.y);
+      // Half the growth, in the element's frame, then rotated back into paper space.
+      const shift = rotateVector(
+        (corner.sx * (nextWidth - from.size.width)) / 2,
+        (corner.sy * (nextHeight - from.size.height)) / 2,
+        from.angle
+      );
+      const centerX = from.position.x + from.size.width / 2 + shift.x;
+      const centerY = from.position.y + from.size.height / 2 + shift.y;
+      setCell({
+        id,
+        type: 'element',
+        data,
+        size: { width: nextWidth, height: nextHeight },
+        position: { x: centerX - nextWidth / 2, y: centerY - nextHeight / 2 },
+      });
+    },
+    [corner, data, id, setCell]
+  );
+
+  const handleRef = useHandleDrag(onDragStart, onDrag);
+
+  return (
+    <rect
+      ref={handleRef}
+      className="edhandle"
+      x={(corner.sx < 0 ? 0 : width) - HANDLE_SIZE / 2}
+      y={(corner.sy < 0 ? 0 : height) - HANDLE_SIZE / 2}
+      width={HANDLE_SIZE}
+      height={HANDLE_SIZE}
+      rx={2}
+      style={{ cursor: corner.cursor }}
+    />
+  );
+}
+
+/** The rotate grip, floating above the node on a short tether. */
+function RotateHandle({
+  data,
+  width,
+  geometry,
+}: Readonly<{
+  data: EditorData;
+  width: number;
+  geometry: React.RefObject<DragStart | null>;
+}>): ReactNode {
+  const id = useCellId();
+  const { setCell } = useGraph<ElementRecord<EditorData>>();
+  const start = useRef<DragStart | null>(null);
+
+  const onDragStart = useCallback(() => {
+    start.current = geometry.current;
+  }, [geometry]);
+
+  const onDrag = useCallback(
+    (pointer: g.Point, event: PointerEvent) => {
+      const from = start.current;
+      if (from === null) {
+        return;
+      }
+      // Rotation is about the element's center, which the gesture never moves.
+      const center = {
+        x: from.position.x + from.size.width / 2,
+        y: from.position.y + from.size.height / 2,
+      };
+      setCell({ id, type: 'element', data, angle: angleFromCenter(center, pointer, event.shiftKey) });
+    },
+    [data, id, setCell]
+  );
+
+  const handleRef = useHandleDrag(onDragStart, onDrag);
+
+  return (
+    <g>
+      <line className="edrotate__tether" x1={width / 2} y1={0} x2={width / 2} y2={-ROTATE_OFFSET} />
+      <circle
+        ref={handleRef}
+        className="edrotate"
+        cx={width / 2}
+        cy={-ROTATE_OFFSET}
+        r={HANDLE_SIZE / 2 + 1.5}
+      />
+    </g>
+  );
+}
+
+/**
+ * The transform overlay drawn on the selected node: four corner grips plus the
+ * rotate handle. Live geometry is mirrored into a ref so a drag reads the state
+ * it started from rather than a stale closure.
+ */
+function TransformHandles({
+  data,
+  width,
+  height,
+}: Readonly<{ data: EditorData; width: number; height: number }>): ReactNode {
+  const position = useCell(selectElementPosition);
+  const angle = useCell(selectElementAngle);
+  const geometry = useRef<DragStart | null>(null);
+  const { paper } = usePaper();
+
+  // Rebuilt every render; a drag snapshots it on pointerdown. `pointer` is
+  // filled in per-gesture from the paper, so a dummy origin is fine here.
+  geometry.current = {
+    pointer: paper?.clientToLocalPoint({ x: 0, y: 0 }) ?? ({ x: 0, y: 0 } as g.Point),
+    position,
+    size: { width, height },
+    angle,
+  };
+
+  return (
+    <g className="edhandles">
+      {CORNERS.map((corner) => (
+        <ResizeHandle
+          key={`${corner.sx},${corner.sy}`}
+          corner={corner}
+          data={data}
+          width={width}
+          height={height}
+          geometry={geometry}
+        />
+      ))}
+      <RotateHandle data={data} width={width} geometry={geometry} />
+    </g>
+  );
 }
 
 /* -------------------------------------------------------------------------- */
