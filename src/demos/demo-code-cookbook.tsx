@@ -1,18 +1,6 @@
-import { useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
-import { Highlight, themes } from 'prism-react-renderer';
+import type { ReactNode } from 'react';
 
-import { useTheme } from '../app/theme.tsx';
-
-/** One documented snippet: a title, a one-line why, the code, and an optional live demo. */
-interface Snippet {
-  readonly id: string;
-  readonly title: string;
-  readonly desc: string;
-  readonly code: string;
-  /** Slug of the demo that uses this pattern. */
-  readonly demo?: string;
-}
+import { Cookbook, type Snippet } from '../components/cookbook.tsx';
 
 const SNIPPETS: readonly Snippet[] = [
   {
@@ -207,71 +195,18 @@ resetCells(nextDataset);`,
   },
 ];
 
-/** TSX code with Prism syntax highlighting, themed to match the app. */
-function CodeBlock({ code }: Readonly<{ code: string }>): ReactNode {
-  const { theme } = useTheme();
-  const prismTheme = theme === 'dark' ? themes.oneDark : themes.oneLight;
-  return (
-    <Highlight code={code} language="tsx" theme={prismTheme}>
-      {({ tokens, getLineProps, getTokenProps }) => (
-        <pre className="code__pre" style={{ background: 'transparent' }}>
-          {tokens.map((line, lineIndex) => (
-            <div key={lineIndex} {...getLineProps({ line })}>
-              {line.map((token, tokenIndex) => (
-                <span key={tokenIndex} {...getTokenProps({ token })} />
-              ))}
-            </div>
-          ))}
-        </pre>
-      )}
-    </Highlight>
-  );
-}
-
-function SnippetCard({ item }: Readonly<{ item: Snippet }>): ReactNode {
-  const [copied, setCopied] = useState(false);
-
-  const copy = () => {
-    void navigator.clipboard?.writeText(item.code).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    });
-  };
-
-  return (
-    <section className="snippet">
-      <div className="snippet__head">
-        <div>
-          <h2 className="snippet__title">{item.title}</h2>
-          <p className="snippet__desc">{item.desc}</p>
-        </div>
-        {item.demo !== undefined && (
-          <Link className="snippet__demo" to={`/demo/${item.demo}`}>
-            → live demo
-          </Link>
-        )}
-      </div>
-      <div className="code">
-        <button type="button" className="copy-btn" onClick={copy}>
-          {copied ? 'Copied ✓' : 'Copy'}
-        </button>
-        <CodeBlock code={item.code} />
-      </div>
-    </section>
-  );
-}
-
 /** Code cookbook — the minimal snippets behind every pattern in the showcase. */
 export function CookbookDemo(): ReactNode {
   return (
-    <div className="cookbook">
-      <p className="cookbook__intro">
-        The smallest correct snippets for the core patterns. Everything uses only the free{' '}
-        <code>@joint/react</code> + <code>@joint/core</code> APIs. Copy a block, or open its live demo.
-      </p>
-      {SNIPPETS.map((item) => (
-        <SnippetCard key={item.id} item={item} />
-      ))}
-    </div>
+    <Cookbook
+      basePath="/joint/demo"
+      snippets={SNIPPETS}
+      intro={
+        <>
+          The smallest correct snippets for the core patterns. Everything uses only the free{' '}
+          <code>@joint/react</code> + <code>@joint/core</code> APIs. Copy a block, or open its live demo.
+        </>
+      }
+    />
   );
 }

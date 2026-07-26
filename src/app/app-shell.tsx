@@ -1,12 +1,18 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { Link, Navigate, NavLink, Outlet, useParams } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
-import { DEMOS } from './demo-registry.tsx';
+import { DEFAULT_DEMO_PATH, demoPath, findLibrary, LIBRARIES } from './demo-registry.tsx';
 import { useTheme } from './theme.tsx';
 
-/** Persistent chrome: brand, sidebar navigation, theme toggle, routed content. */
+/** Persistent chrome: brand, library tabs, sidebar navigation, theme toggle. */
 export function AppShell(): ReactNode {
   const { theme, toggleTheme } = useTheme();
+  const { lib } = useParams();
+  const activeLibrary = findLibrary(lib);
+
+  if (activeLibrary === undefined) {
+    return <Navigate to={DEFAULT_DEMO_PATH} replace />;
+  }
 
   return (
     <div className="shell">
@@ -16,16 +22,31 @@ export function AppShell(): ReactNode {
             ◆
           </span>
           <span className="brand__text">
-            JointJS <span className="brand__accent">React</span>
+            Diagram <span className="brand__accent">Showcase</span>
           </span>
         </div>
-        <p className="sidebar__hint">Interactive showcase · free stack</p>
+
+        <div className="libtabs" role="tablist" aria-label="Diagramming library">
+          {LIBRARIES.map((library) => (
+            <Link
+              key={library.id}
+              to={demoPath(library.id, library.defaultSlug)}
+              role="tab"
+              aria-selected={library.id === activeLibrary.id}
+              className={`libtab${library.id === activeLibrary.id ? ' libtab--active' : ''}`}
+            >
+              {library.label}
+            </Link>
+          ))}
+        </div>
+
+        <p className="sidebar__hint">{activeLibrary.blurb}</p>
 
         <nav className="nav" aria-label="Demos">
-          {DEMOS.map((demo) => (
+          {activeLibrary.demos.map((demo) => (
             <NavLink
               key={demo.slug}
-              to={`/demo/${demo.slug}`}
+              to={demoPath(activeLibrary.id, demo.slug)}
               className={({ isActive }) => `nav__item${isActive ? ' nav__item--active' : ''}`}
             >
               <span className="nav__tag">{demo.tag}</span>

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 
 import '@joint/react/styles.css';
+import '@xyflow/react/dist/style.css';
 import './index.css';
 import { App } from './App.tsx';
 import { ThemeProvider } from './app/theme.tsx';

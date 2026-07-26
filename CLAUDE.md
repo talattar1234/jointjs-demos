@@ -5,13 +5,22 @@ Guidance for working in this repo (for Claude and humans). Read
 
 ## What this is
 
-A demo showcase for the **free** JointJS React stack (`@joint/react` +
-`@joint/core`). Do **not** introduce `@joint/plus` (commercial) — anything a plus
-widget would do is hand-rolled here.
+A side-by-side showcase of **two** React diagramming libraries, one per tab:
+
+- **JointJS** — the **free** React stack (`@joint/react` + `@joint/core`). Do
+  **not** introduce `@joint/plus` (commercial) — anything a plus widget would do
+  is hand-rolled here.
+- **React Flow** (`@xyflow/react`).
+
+The **same demo list** is implemented on both. Both tabs draw from the shared
+`src/data` modules (single source of truth), so they're apples-to-apples. JointJS
+demos live in `src/demos/demo-*.tsx`; React Flow demos in `src/reactflow/flow-*.tsx`.
+The pairing and metadata are wired up in `src/app/demo-registry.tsx`.
 
 ## Conventions
 
-Mirrors `@joint/react`'s own style so our code reads like the library:
+Mirrors `@joint/react`'s own style so our code reads like the library (the React
+Flow side follows the same conventions and `@xyflow/react` idioms):
 
 - **File names** kebab-case; **components** PascalCase.
 - **No `any`.** Prefer `readonly` / immutable data. Use `unknown` + narrowing at
@@ -49,15 +58,27 @@ Mirrors `@joint/react`'s own style so our code reads like the library:
 
 ## How to add a demo
 
-1. Create `src/demos/demo-<tag>-<name>.tsx` exporting a component.
-2. Mount `DiagramCanvas` inside a `<GraphProvider>`; pass `renderElement`.
-   Reuse `SelectionProvider`/`SelectionLayer`, `useEventLog`, `ContextMenu` as needed.
-3. Register it in `src/app/demo-registry.tsx` (`slug`, `tag`, `title`, `tagline`,
-   `ready: true`, `Component`).
-4. Style with existing classes / tokens in `index.css`.
-5. `npm run typecheck && npm run build`.
+A demo exists once as shared metadata and (ideally) once per library. Both tabs
+build from the same `DEMO_META` list in `src/app/demo-registry.tsx`.
+
+1. Add the demo's metadata to `DEMO_META` in `src/app/demo-registry.tsx`
+   (`slug`, `tag`, `title`, `tagline`, `scroll?`) — this is what both tabs share.
+2. **JointJS side:** create `src/demos/demo-<tag>-<name>.tsx`. Mount
+   `DiagramCanvas` inside a `<GraphProvider>`; pass `renderElement`. Reuse
+   `SelectionProvider`/`SelectionLayer`, `useEventLog`, `ContextMenu` as needed.
+   Map its `slug` → component in `JOINT_COMPONENTS`.
+3. **React Flow side:** create `src/reactflow/flow-<tag>-<name>.tsx`. Mount
+   `FlowCanvas`; reuse `cellsToFlow` (`adapt.ts`) to convert the shared
+   `src/data` cells into nodes/edges, and the shared node/edge types. Map its
+   `slug` → component in `REACTFLOW_COMPONENTS`.
+   (`ready` is derived from whether a component exists — no need to set it.)
+4. Put shared data in `src/data/*` so both tabs render the same graph.
+5. Style with existing classes / tokens in `index.css` (shared across tabs).
+6. `npm run typecheck && npm run build`.
 
 ## Gotchas
+
+JointJS:
 
 - **SVG stroke ≠ `var()`.** Set link/SVG colors to concrete hex; CSS variables
   don't resolve in SVG presentation attributes. (CSS `fill`/`stroke` set via a
@@ -72,6 +93,20 @@ Mirrors `@joint/react`'s own style so our code reads like the library:
   `HTMLBox` and per-cell subscriptions in the render path.
 - **Undo/redo (demo j)** is snapshot-based (`exportToJSON`/`importFromJSON`) with a
   `restoring` guard so restores don't re-enter the history.
+
+React Flow:
+
+- **Node/edge type maps** (`FLOW_NODE_TYPES`, `EDGE_TYPES`, …) must be module-level
+  constants — inline objects give a new identity each render and React Flow warns.
+- **Floating edges** are the default (`type: 'floating'`), so nodes need no
+  handles; endpoints are computed from node-center intersections in `flow-edges.tsx`.
+- **Theme** flows through `<ReactFlow colorMode>` (wired in `FlowCanvas`); don't
+  restyle it by hand. Node/edge visuals reuse the shared `.flow-node` / token CSS.
+- **Data conversion** goes through `cellsToFlow` (`adapt.ts`) — don't hand-build
+  nodes/edges; the JointJS `CellRecord` union is loose and narrowing lives there.
+
+Both:
+
 - **StrictMode** double-invokes effects in dev; one-time init effects use a ref guard.
 
 ## Verification

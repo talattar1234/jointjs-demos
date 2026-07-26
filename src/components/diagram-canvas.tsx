@@ -1,17 +1,20 @@
-import { useCallback, useEffect, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import {
   Paper,
   useOnElementsMeasured,
   type PaperProps,
   type RenderElement,
   type RenderLink,
-} from '@joint/react';
-import type { dia } from '@joint/core';
+} from "@joint/react";
+import type { dia } from "@joint/core";
 
-import { useZoomPan, ZoomPanContext } from '../hooks/use-zoom-pan.ts';
-import { ZoomControls } from './zoom-controls.tsx';
+import { useZoomPan, ZoomPanContext } from "../hooks/use-zoom-pan.ts";
+import { ZoomControls } from "./zoom-controls.tsx";
 
-type PaperExtras = Omit<PaperProps, 'renderElement' | 'renderLink' | 'transform' | 'style' | 'children'>;
+type PaperExtras = Omit<
+  PaperProps,
+  "renderElement" | "renderLink" | "transform" | "style" | "children"
+>;
 
 interface DiagramCanvasProps<TElement, TLink> {
   readonly renderElement?: RenderElement<TElement>;
@@ -67,39 +70,51 @@ export function DiagramCanvas<TElement = unknown, TLink = unknown>({
     }
   });
 
-  const handleBlankPointerDown = useCallback<NonNullable<PaperProps['onBlankPointerDown']>>(
+  const handleBlankPointerDown = useCallback<
+    NonNullable<PaperProps["onBlankPointerDown"]>
+  >(
     (params) => {
-      panOrigin.current = { x: params.event.clientX ?? 0, y: params.event.clientY ?? 0 };
+      panOrigin.current = {
+        x: params.event.clientX ?? 0,
+        y: params.event.clientY ?? 0,
+      };
       if (containerRef.current !== null) {
-        containerRef.current.style.cursor = 'grabbing';
+        containerRef.current.style.cursor = "grabbing";
       }
       paperProps?.onBlankPointerDown?.(params);
     },
-    [paperProps]
+    [paperProps],
   );
 
-  const handleBlankPointerMove = useCallback<NonNullable<PaperProps['onBlankPointerMove']>>(
+  const handleBlankPointerMove = useCallback<
+    NonNullable<PaperProps["onBlankPointerMove"]>
+  >(
     (params) => {
       if (panOrigin.current !== null) {
         const clientX = params.event.clientX ?? 0;
         const clientY = params.event.clientY ?? 0;
-        zoom.panBy(clientX - panOrigin.current.x, clientY - panOrigin.current.y);
+        zoom.panBy(
+          clientX - panOrigin.current.x,
+          clientY - panOrigin.current.y,
+        );
         panOrigin.current = { x: clientX, y: clientY };
       }
       paperProps?.onBlankPointerMove?.(params);
     },
-    [paperProps, zoom]
+    [paperProps, zoom],
   );
 
-  const handleBlankPointerUp = useCallback<NonNullable<PaperProps['onBlankPointerUp']>>(
+  const handleBlankPointerUp = useCallback<
+    NonNullable<PaperProps["onBlankPointerUp"]>
+  >(
     (params) => {
       panOrigin.current = null;
       if (containerRef.current !== null) {
-        containerRef.current.style.cursor = '';
+        containerRef.current.style.cursor = "";
       }
       paperProps?.onBlankPointerUp?.(params);
     },
-    [paperProps]
+    [paperProps],
   );
 
   const zoomToSelected = useCallback(() => {
@@ -115,7 +130,7 @@ export function DiagramCanvas<TElement = unknown, TLink = unknown>({
         renderElement={renderElement}
         renderLink={renderLink}
         transform={zoom.transform}
-        style={{ width: '100%', height: '100%' }}
+        style={{ width: "100%", height: "100%" }}
         onBlankPointerDown={handleBlankPointerDown}
         onBlankPointerMove={handleBlankPointerMove}
         onBlankPointerUp={handleBlankPointerUp}
@@ -123,7 +138,9 @@ export function DiagramCanvas<TElement = unknown, TLink = unknown>({
       {showZoomControls && (
         <ZoomControls
           zoom={zoom}
-          onZoomToSelected={selectedId === undefined ? undefined : zoomToSelected}
+          onZoomToSelected={
+            selectedId === undefined ? undefined : zoomToSelected
+          }
           hasSelection={selectedId !== null && selectedId !== undefined}
         />
       )}

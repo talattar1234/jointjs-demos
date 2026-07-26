@@ -1175,7 +1175,8 @@ button {
   .flow-line,
   .legend__pulse,
   .flow-node--alert,
-  .joint-cell.flash {
+  .joint-cell.flash,
+  .react-flow__edge.animated .react-flow__edge-path {
     animation: none;
   }
 
@@ -1184,4 +1185,239 @@ button {
     border-color: var(--crit);
     box-shadow: inset 0 0 0 2px var(--crit);
   }
+}
+
+/* ============================================================================
+   Library tabs (JointJS · React Flow)
+   ========================================================================== */
+.libtabs {
+  display: flex;
+  gap: 6px;
+  padding: 5px;
+  border-radius: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+}
+
+.libtab {
+  flex: 1;
+  text-align: center;
+  padding: 8px 10px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: background 0.16s, color 0.16s, box-shadow 0.16s;
+}
+
+.libtab:hover {
+  color: var(--text);
+}
+
+.libtab--active {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #fff;
+  box-shadow: 0 8px 20px -10px var(--accent-glow);
+}
+
+/* ============================================================================
+   React Flow — themed to the app's tokens
+   ========================================================================== */
+.rf-canvas .react-flow {
+  background: transparent;
+}
+
+.rf-canvas .react-flow__attribution {
+  display: none;
+}
+
+/* Zoom controls */
+.react-flow__controls {
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.react-flow__controls-button {
+  width: 30px;
+  height: 30px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+
+.react-flow__controls-button:hover {
+  background: var(--accent-soft);
+}
+
+.react-flow__controls-button svg {
+  fill: currentColor;
+}
+
+.react-flow__minimap {
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+/* Edge labels (floating edges) */
+.rf-edge-label {
+  position: absolute;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  border: 1px solid var(--border);
+  pointer-events: none;
+}
+
+/* Selection + flash mirror the JointJS side */
+.rf-canvas .react-flow__node.selected .flow-node {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.rf-canvas .react-flow__node.selected .rf-ednode {
+  border-color: var(--accent);
+}
+
+.rf-canvas .react-flow__edge.selected .react-flow__edge-path {
+  filter: drop-shadow(0 0 6px var(--accent-glow));
+  stroke-width: 3;
+}
+
+.rf-canvas .react-flow__node.flash .flow-node {
+  animation: cell-flash 0.5s ease;
+}
+
+.rf-canvas .react-flow__edge.flash .react-flow__edge-path {
+  animation: rf-edge-flash 0.5s ease;
+}
+
+@keyframes rf-edge-flash {
+  30% {
+    stroke: var(--accent);
+    stroke-width: 4;
+  }
+}
+
+/* Scale-test node (cheapest markup) */
+.rf-scale-node {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+.rf-scale-node__label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #0b0f1a;
+}
+
+.stage__canvas.labels-hidden .rf-scale-node__label {
+  display: none;
+}
+
+/* Editor node (HTML) — demo j */
+.rf-ednode {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--panel-2);
+  border: 1.5px solid var(--border-strong);
+  color: var(--text);
+}
+
+.rf-ednode__text {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.rf-ednode__input {
+  width: 82%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  outline: 2px solid var(--accent);
+}
+
+.react-flow__handle.rf-port {
+  width: 11px;
+  height: 11px;
+  background: var(--accent);
+  border: 2px solid var(--panel);
+}
+
+.react-flow__handle.rf-port:hover {
+  background: var(--accent-2);
+}
+
+/* Service card (dashboard) — reuses the shared .svc__* inner classes */
+/* Handles exist only so React Flow will instantiate the floating edges; the
+   floating router computes its own endpoints, so keep them invisible. */
+.react-flow__handle.rf-svc__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.rf-svc {
+  --status: var(--ok);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, var(--elevated), var(--panel));
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 26px -16px rgba(0, 0, 0, 0.65);
+  color: var(--text);
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.rf-svc::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--status);
+}
+
+.rf-svc--warn {
+  --status: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--border));
+}
+
+.rf-svc--crit {
+  --status: var(--crit);
+  border-color: color-mix(in srgb, var(--crit) 55%, var(--border));
+  box-shadow: 0 0 22px -6px var(--crit);
+}
+
+/* Background underlay layer (demo bg) — synced to the viewport transform */
+.rf-underlay-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background-repeat: repeat;
 }

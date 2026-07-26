@@ -1,13 +1,17 @@
-import { useParams } from 'react-router-dom';
+import { Navigate, useParams } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
-import { findDemo } from './demo-registry.tsx';
+import { DEFAULT_DEMO_PATH, findDemo, findLibrary } from './demo-registry.tsx';
 
-/** Resolves the `:slug` param to a demo and renders it, or a placeholder. */
+/** Resolves the `:lib`/`:slug` params to a demo and renders it, or a placeholder. */
 export function DemoPage(): ReactNode {
-  const { slug } = useParams();
-  const demo = findDemo(slug);
+  const { lib, slug } = useParams();
+  const library = findLibrary(lib);
+  if (library === undefined) {
+    return <Navigate to={DEFAULT_DEMO_PATH} replace />;
+  }
 
+  const demo = findDemo(lib, slug);
   if (demo === undefined) {
     return <div className="demo-empty">Unknown demo.</div>;
   }
@@ -15,7 +19,9 @@ export function DemoPage(): ReactNode {
   return (
     <div className="demo">
       <header className="demo__header">
-        <div className="demo__eyebrow">Demo {demo.tag}</div>
+        <div className="demo__eyebrow">
+          {library.label} · Demo {demo.tag}
+        </div>
         <h1 className="demo__title">{demo.title}</h1>
         <p className="demo__tagline">{demo.tagline}</p>
       </header>
