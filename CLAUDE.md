@@ -5,22 +5,26 @@ Guidance for working in this repo (for Claude and humans). Read
 
 ## What this is
 
-A side-by-side showcase of **two** React diagramming libraries, one per tab:
+A side-by-side showcase of **three** React diagramming libraries, one per tab:
 
 - **JointJS** — the **free** React stack (`@joint/react` + `@joint/core`). Do
   **not** introduce `@joint/plus` (commercial) — anything a plus widget would do
   is hand-rolled here.
 - **React Flow** (`@xyflow/react`).
+- **GoJS** (`gojs`) — commercial, canvas-rendered. No license key is configured,
+  so it runs in evaluation mode with a watermark; that's accepted, don't try to
+  work around it.
 
-The **same demo list** is implemented on both. Both tabs draw from the shared
+The **same demo list** is implemented on all three. Every tab draws from the shared
 `src/data` modules (single source of truth), so they're apples-to-apples. JointJS
-demos live in `src/demos/demo-*.tsx`; React Flow demos in `src/reactflow/flow-*.tsx`.
-The pairing and metadata are wired up in `src/app/demo-registry.tsx`.
+demos live in `src/demos/demo-*.tsx`; React Flow demos in `src/reactflow/flow-*.tsx`;
+GoJS demos in `src/gojs/go-*.tsx`. The pairing and metadata are wired up in
+`src/app/demo-registry.tsx`.
 
 ## Conventions
 
 Mirrors `@joint/react`'s own style so our code reads like the library (the React
-Flow side follows the same conventions and `@xyflow/react` idioms):
+Flow and GoJS sides follow the same conventions plus their own library's idioms):
 
 - **File names** kebab-case; **components** PascalCase.
 - **No `any`.** Prefer `readonly` / immutable data. Use `unknown` + narrowing at
@@ -58,11 +62,11 @@ Flow side follows the same conventions and `@xyflow/react` idioms):
 
 ## How to add a demo
 
-A demo exists once as shared metadata and (ideally) once per library. Both tabs
-build from the same `DEMO_META` list in `src/app/demo-registry.tsx`.
+A demo exists once as shared metadata and (ideally) once per library. Every tab
+builds from the same `DEMO_META` list in `src/app/demo-registry.tsx`.
 
 1. Add the demo's metadata to `DEMO_META` in `src/app/demo-registry.tsx`
-   (`slug`, `tag`, `title`, `tagline`, `scroll?`) — this is what both tabs share.
+   (`slug`, `tag`, `title`, `tagline`, `scroll?`) — this is what all tabs share.
 2. **JointJS side:** create `src/demos/demo-<tag>-<name>.tsx`. Mount
    `DiagramCanvas` inside a `<GraphProvider>`; pass `renderElement`. Reuse
    `SelectionProvider`/`SelectionLayer`, `useEventLog`, `ContextMenu` as needed.
@@ -71,10 +75,16 @@ build from the same `DEMO_META` list in `src/app/demo-registry.tsx`.
    `FlowCanvas`; reuse `cellsToFlow` (`adapt.ts`) to convert the shared
    `src/data` cells into nodes/edges, and the shared node/edge types. Map its
    `slug` → component in `REACTFLOW_COMPONENTS`.
+4. **GoJS side:** create `src/gojs/go-<tag>-<name>.tsx`. Mount `GoCanvas` with a
+   **stable** `init` callback (module function + `useCallback(fn, [])`) that sets
+   `nodeTemplate`/`linkTemplate` from `go-templates.ts` and assigns a model from
+   `createGoModel` (`adapt.ts`). Take the live diagram via `onReady`. Map its
+   `slug` → component in `GOJS_COMPONENTS`.
    (`ready` is derived from whether a component exists — no need to set it.)
-4. Put shared data in `src/data/*` so both tabs render the same graph.
-5. Style with existing classes / tokens in `index.css` (shared across tabs).
-6. `npm run typecheck && npm run build`.
+5. Put shared data in `src/data/*` so every tab renders the same graph.
+6. Style with existing classes / tokens in `index.css` (shared across tabs) — but
+   see the GoJS gotchas: canvas shapes need colors in `go-theme.ts` instead.
+7. `npm run typecheck && npm run build`.
 
 ## Gotchas
 
@@ -105,7 +115,33 @@ React Flow:
 - **Data conversion** goes through `cellsToFlow` (`adapt.ts`) — don't hand-build
   nodes/edges; the JointJS `CellRecord` union is loose and narrowing lives there.
 
-Both:
+GoJS:
+
+- **CSS does not reach the shapes.** GoJS draws to a `<canvas>`, so `var()` tokens,
+  `.flow-node`, keyframes, and `:hover` are all unavailable inside a node. Colors
+  and fonts live in `src/gojs/go-theme.ts` as GoJS themes; bind them with
+  `.theme('fill', 'nodeFill')`, or `.themeData('fill', 'kind', 'kinds')` when a data
+  value selects the color. Never hard-code a hex in a template — it won't follow the
+  light/dark toggle.
+- **`GoCanvas`'s `init` must be stable.** It's an effect dependency; an inline arrow
+  rebuilds the whole diagram every render. Use a module-level function wrapped in
+  `useCallback(fn, [])`.
+- **Build a fresh model per mount.** `createGoModel` returns arrays GoJS *writes
+  back into* (`loc` via the two-way location binding). Never share one model or one
+  node-data array between two diagrams.
+- **Model changes need a transaction.** `model.commit(fn, 'name')` records an undo
+  edit; `model.commit(fn, null)` deliberately doesn't — use `null` for
+  high-frequency updates like the dashboard tick. To delete a node use
+  `diagram.remove(node)` (takes its links with it), not `model.removeNodeData`.
+- **Node positions are top-left** only because templates set
+  `locationSpot: go.Spot.TopLeft` and bind `location` ↔ `loc`. GoJS defaults to
+  centering, which would misalign against the other two tabs.
+- **Teardown is `diagram.div = null`.** That's GoJS's documented dispose;
+  `GoCanvas` already does it, and it's what makes StrictMode's double-invoke safe.
+- **Animation is `go.Animation`,** not CSS — and `prefers-reduced-motion` has to be
+  checked explicitly with `matchMedia` (demos a and i both do).
+
+All three:
 
 - **StrictMode** double-invokes effects in dev; one-time init effects use a ref guard.
 

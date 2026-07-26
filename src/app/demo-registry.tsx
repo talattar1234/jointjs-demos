@@ -28,8 +28,22 @@ import { FlowScaleDemo } from '../reactflow/flow-k-scale.tsx';
 import { FlowBackgroundDemo } from '../reactflow/flow-bg-background.tsx';
 import { FlowCookbookDemo } from '../reactflow/flow-code-cookbook.tsx';
 
-/** The two diagramming libraries the showcase compares, one per tab. */
-export type LibraryId = 'joint' | 'reactflow';
+import { GoBlinkingDemo } from '../gojs/go-a-blinking.tsx';
+import { GoSelectionDemo } from '../gojs/go-b-selection.tsx';
+import { GoContextMenuDemo } from '../gojs/go-c-context-menu.tsx';
+import { GoCodeSelectDemo } from '../gojs/go-d-code-select.tsx';
+import { GoAddRemoveDemo } from '../gojs/go-e-add-remove.tsx';
+import { GoDatasetsDemo } from '../gojs/go-f-datasets.tsx';
+import { GoEventsDemo } from '../gojs/go-g-events.tsx';
+import { GoZoomToDemo } from '../gojs/go-h-zoom-to.tsx';
+import { GoDashboardDemo } from '../gojs/go-i-dashboard.tsx';
+import { GoEditorDemo } from '../gojs/go-j-editor.tsx';
+import { GoScaleDemo } from '../gojs/go-k-scale.tsx';
+import { GoBackgroundDemo } from '../gojs/go-bg-background.tsx';
+import { GoCookbookDemo } from '../gojs/go-code-cookbook.tsx';
+
+/** The three diagramming libraries the showcase compares, one per tab. */
+export type LibraryId = 'joint' | 'reactflow' | 'gojs';
 
 /** A single showcase entry surfaced in the sidebar and routed by `slug`. */
 export interface DemoEntry {
@@ -59,7 +73,7 @@ interface DemoMeta {
 }
 
 /**
- * The ordered demo list (metadata only). Both the JointJS and React Flow tabs
+ * The ordered demo list (metadata only). The JointJS, React Flow and GoJS tabs
  * are built from this single source of truth, guaranteeing they stay in lockstep.
  */
 const DEMO_META: readonly DemoMeta[] = [
@@ -111,6 +125,22 @@ const REACTFLOW_COMPONENTS: Record<string, ComponentType> = {
   'bg-background': FlowBackgroundDemo,
 };
 
+const GOJS_COMPONENTS: Record<string, ComponentType> = {
+  'code-cookbook': GoCookbookDemo,
+  'i-dashboard': GoDashboardDemo,
+  'k-scale': GoScaleDemo,
+  'b-selection': GoSelectionDemo,
+  'g-events': GoEventsDemo,
+  'h-zoom-to': GoZoomToDemo,
+  'a-blinking': GoBlinkingDemo,
+  'c-context-menu': GoContextMenuDemo,
+  'd-code-select': GoCodeSelectDemo,
+  'e-add-remove': GoAddRemoveDemo,
+  'f-datasets': GoDatasetsDemo,
+  'j-editor': GoEditorDemo,
+  'bg-background': GoBackgroundDemo,
+};
+
 /** Attach a library's components to the shared metadata to build its demo list. */
 function buildDemos(components: Record<string, ComponentType>): readonly DemoEntry[] {
   return DEMO_META.map((meta) => ({
@@ -135,6 +165,7 @@ export interface Library {
 export const LIBRARIES: readonly Library[] = [
   { id: 'joint', label: 'JointJS', blurb: 'Interactive showcase · free @joint/react stack', defaultSlug: 'i-dashboard', demos: buildDemos(JOINT_COMPONENTS) },
   { id: 'reactflow', label: 'React Flow', blurb: 'The same demos, rebuilt on @xyflow/react', defaultSlug: 'i-dashboard', demos: buildDemos(REACTFLOW_COMPONENTS) },
+  { id: 'gojs', label: 'GoJS', blurb: 'The same demos on gojs — canvas-rendered, commercial (evaluation build)', defaultSlug: 'i-dashboard', demos: buildDemos(GOJS_COMPONENTS) },
 ];
 
 /** The library shown when no tab is specified. */

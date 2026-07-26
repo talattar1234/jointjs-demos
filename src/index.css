@@ -1191,7 +1191,7 @@ button {
 }
 
 /* ============================================================================
-   Library tabs (JointJS · React Flow)
+   Library tabs (JointJS · React Flow · GoJS)
    ========================================================================== */
 .libtabs {
   display: flex;
@@ -1204,11 +1204,14 @@ button {
 
 .libtab {
   flex: 1;
+  min-width: 0;
   text-align: center;
-  padding: 8px 10px;
+  /* Tightened so three tabs still fit the 312px sidebar without wrapping. */
+  padding: 8px 6px;
   border-radius: 9px;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
+  white-space: nowrap;
   color: var(--text-dim);
   text-decoration: none;
   transition: background 0.16s, color 0.16s, box-shadow 0.16s;
@@ -1423,4 +1426,42 @@ button {
   pointer-events: none;
   opacity: 0.5;
   background-repeat: repeat;
+}
+
+/* ============================================================================
+   GoJS — a canvas mounted in the shared .canvas chrome
+   ========================================================================== */
+
+/*
+ * GoJS renders to its own <canvas> inside this div, so — unlike the other two
+ * tabs — none of the tokens above reach the shapes. Node/link colors live in
+ * src/gojs/go-theme.ts as GoJS themes instead. What is styled here is only the
+ * frame around the canvas.
+ */
+.go-canvas__host {
+  position: absolute;
+  inset: 0;
+  /* Let the .canvas gradient show through; GoJS paints on a transparent canvas. */
+  background: transparent;
+  /* GoJS handles its own wheel/drag gestures. */
+  touch-action: none;
+}
+
+.go-canvas__host canvas {
+  display: block;
+  outline: none;
+}
+
+/* GoJS's Overview (its minimap) gets its own diagram and therefore its own div. */
+.go-overview {
+  position: absolute;
+  right: 16px;
+  bottom: 62px;
+  width: 180px;
+  height: 120px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  box-shadow: var(--shadow);
+  overflow: hidden;
 }
