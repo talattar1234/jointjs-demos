@@ -968,6 +968,9 @@ button {
   position: absolute;
   left: 16px;
   top: 16px;
+  /* Sit above the React Flow node layer so nodes overlapping the panel don't
+     intercept button clicks (nodes elevate on select — stay above that too). */
+  z-index: 6;
   width: 224px;
   display: flex;
   flex-direction: column;
