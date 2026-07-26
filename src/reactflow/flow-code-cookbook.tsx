@@ -93,9 +93,13 @@ setEdges((es) => es.filter((e) => e.source !== id && e.target !== id));`,
 
 const [selectedId, setSelectedId] = useState<string | null>(null);
 
-useOnSelectionChange({
-  onChange: ({ nodes }) => setSelectedId(nodes[0]?.id ?? null),
-});
+// Memoize the handler — useOnSelectionChange resubscribes on every
+// identity change, so an inline function breaks selection tracking.
+const onChange = useCallback(
+  ({ nodes }) => setSelectedId(nodes[0]?.id ?? null),
+  [],
+);
+useOnSelectionChange({ onChange });
 
 // Select from code by toggling the node's \`selected\` flag.
 setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === targetId })));`,

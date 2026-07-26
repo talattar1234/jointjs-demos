@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import {
   ReactFlowProvider,
   useEdgesState,
@@ -7,6 +7,7 @@ import {
   useReactFlow,
   useViewport,
   type Node,
+  type OnSelectionChangeFunc,
 } from '@xyflow/react';
 
 import { FlowCanvas } from './flow-canvas.tsx';
@@ -63,9 +64,13 @@ function ZoomStage(): ReactNode {
   const [edges, , onEdgesChange] = useEdgesState(INITIAL_EDGES);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  useOnSelectionChange({
-    onChange: ({ nodes: selectedNodes }) => setSelectedId(selectedNodes[0]?.id ?? null),
-  });
+  // The handler MUST be memoized: useOnSelectionChange resubscribes whenever
+  // `onChange` changes identity, so an inline function breaks selection tracking.
+  const onSelectionChange = useCallback<OnSelectionChangeFunc>(
+    ({ nodes: selectedNodes }) => setSelectedId(selectedNodes[0]?.id ?? null),
+    []
+  );
+  useOnSelectionChange({ onChange: onSelectionChange });
 
   return (
     <div className="stage">

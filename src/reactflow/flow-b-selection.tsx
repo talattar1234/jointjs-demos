@@ -5,6 +5,7 @@ import {
   useNodesState,
   useOnSelectionChange,
   type Node,
+  type OnSelectionChangeFunc,
 } from '@xyflow/react';
 
 import { FlowCanvas } from './flow-canvas.tsx';
@@ -20,11 +21,12 @@ function SelectionStage(): ReactNode {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // React Flow owns the selection interaction; we just observe it for the chip.
-  useOnSelectionChange({
-    onChange: ({ nodes: selectedNodes, edges: selectedEdges }) => {
-      setSelectedId(selectedNodes[0]?.id ?? selectedEdges[0]?.id ?? null);
-    },
-  });
+  // The handler must be memoized — useOnSelectionChange resubscribes on every
+  // identity change, so an inline function breaks selection tracking.
+  const onSelectionChange = useCallback<OnSelectionChangeFunc>(({ nodes: selectedNodes, edges: selectedEdges }) => {
+    setSelectedId(selectedNodes[0]?.id ?? selectedEdges[0]?.id ?? null);
+  }, []);
+  useOnSelectionChange({ onChange: onSelectionChange });
 
   const clear = useCallback(() => {
     setNodes((previous) => previous.map((node) => (node.selected ? { ...node, selected: false } : node)));

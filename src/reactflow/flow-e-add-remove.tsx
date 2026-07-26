@@ -6,6 +6,7 @@ import {
   useOnSelectionChange,
   type Edge,
   type Node,
+  type OnSelectionChangeFunc,
 } from '@xyflow/react';
 
 import { FlowCanvas } from './flow-canvas.tsx';
@@ -33,9 +34,13 @@ function AddRemoveStage(): ReactNode {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const counter = useRef(0);
 
-  useOnSelectionChange({
-    onChange: ({ nodes: selectedNodes }) => setSelectedId(selectedNodes[0]?.id ?? null),
-  });
+  // Memoized so useOnSelectionChange keeps a stable subscription (an inline
+  // handler resubscribes every render and breaks selection tracking).
+  const onSelectionChange = useCallback<OnSelectionChangeFunc>(
+    ({ nodes: selectedNodes }) => setSelectedId(selectedNodes[0]?.id ?? null),
+    []
+  );
+  useOnSelectionChange({ onChange: onSelectionChange });
 
   const addNode = useCallback(() => {
     counter.current += 1;

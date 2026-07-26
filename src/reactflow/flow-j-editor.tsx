@@ -22,6 +22,7 @@ import {
   type Node,
   type NodeProps,
   type NodeTypes,
+  type OnSelectionChangeFunc,
 } from '@xyflow/react';
 
 import { FlowCanvas } from './flow-canvas.tsx';
@@ -172,9 +173,13 @@ function EditorStage(): ReactNode {
     force();
   }, [setNodes, setEdges]);
 
-  useOnSelectionChange({
-    onChange: ({ nodes: selectedNodes }) => setSelectedId(selectedNodes[0]?.id ?? null),
-  });
+  // Memoized so useOnSelectionChange keeps a stable subscription (an inline
+  // handler resubscribes every render and breaks selection tracking).
+  const onSelectionChange = useCallback<OnSelectionChangeFunc>(
+    ({ nodes: selectedNodes }) => setSelectedId(selectedNodes[0]?.id ?? null),
+    []
+  );
+  useOnSelectionChange({ onChange: onSelectionChange });
 
   const editor = useMemo<EditorContextValue>(
     () => ({
