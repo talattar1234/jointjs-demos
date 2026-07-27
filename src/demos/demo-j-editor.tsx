@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from 'react';
 import {
   GraphProvider,
@@ -241,12 +242,16 @@ const CORNERS: readonly Corner[] = [
   { sx: 1, sy: 1, cursor: 'nwse-resize' },
 ];
 
-/** Geometry captured when a handle drag starts, so each frame is absolute, not incremental. */
-interface DragStart {
-  readonly pointer: g.Point;
+/** The element's live placement, mirrored into a ref for the handles to read. */
+interface NodeGeometry {
   readonly position: dia.Point;
   readonly size: dia.Size;
   readonly angle: number;
+}
+
+/** …plus the pointer that opened the gesture, so each frame is absolute, not incremental. */
+interface DragStart extends NodeGeometry {
+  readonly pointer: g.Point;
 }
 
 /**
@@ -261,7 +266,7 @@ interface DragStart {
  * ships a FreeTransform widget for this; it's off-limits here.)
  */
 function useHandleDrag(
-  onDragStart: () => void,
+  onDragStart: (pointer: g.Point) => void,
   onDrag: (pointer: g.Point, event: PointerEvent) => void
 ): (node: SVGElement | null) => void {
   const { paper } = usePaper();
@@ -289,7 +294,7 @@ function useHandleDrag(
         event.stopPropagation();
         event.preventDefault();
         node.setPointerCapture(event.pointerId);
-        onDragStart();
+        onDragStart(toPaper(event));
         node.addEventListener('pointermove', onPointerMove);
         node.addEventListener('pointerup', onPointerUp);
         node.addEventListener('pointercancel', onPointerUp);
@@ -325,15 +330,18 @@ function ResizeHandle({
   data: EditorData;
   width: number;
   height: number;
-  geometry: React.RefObject<DragStart | null>;
+  geometry: RefObject<NodeGeometry>;
 }>): ReactNode {
   const id = useCellId();
   const { setCell } = useGraph<ElementRecord<EditorData>>();
   const start = useRef<DragStart | null>(null);
 
-  const onDragStart = useCallback(() => {
-    start.current = geometry.current;
-  }, [geometry]);
+  const onDragStart = useCallback(
+    (pointer: g.Point) => {
+      start.current = { ...geometry.current, pointer };
+    },
+    [geometry]
+  );
 
   const onDrag = useCallback(
     (pointer: g.Point) => {
@@ -387,15 +395,18 @@ function RotateHandle({
 }: Readonly<{
   data: EditorData;
   width: number;
-  geometry: React.RefObject<DragStart | null>;
+  geometry: RefObject<NodeGeometry>;
 }>): ReactNode {
   const id = useCellId();
   const { setCell } = useGraph<ElementRecord<EditorData>>();
   const start = useRef<DragStart | null>(null);
 
-  const onDragStart = useCallback(() => {
-    start.current = geometry.current;
-  }, [geometry]);
+  const onDragStart = useCallback(
+    (pointer: g.Point) => {
+      start.current = { ...geometry.current, pointer };
+    },
+    [geometry]
+  );
 
   const onDrag = useCallback(
     (pointer: g.Point, event: PointerEvent) => {
@@ -441,17 +452,10 @@ function TransformHandles({
 }: Readonly<{ data: EditorData; width: number; height: number }>): ReactNode {
   const position = useCell(selectElementPosition);
   const angle = useCell(selectElementAngle);
-  const geometry = useRef<DragStart | null>(null);
-  const { paper } = usePaper();
+  const geometry = useRef<NodeGeometry>({ position, size: { width, height }, angle });
 
-  // Rebuilt every render; a drag snapshots it on pointerdown. `pointer` is
-  // filled in per-gesture from the paper, so a dummy origin is fine here.
-  geometry.current = {
-    pointer: paper?.clientToLocalPoint({ x: 0, y: 0 }) ?? ({ x: 0, y: 0 } as g.Point),
-    position,
-    size: { width, height },
-    angle,
-  };
+  // Refreshed every render, snapshotted by a handle when its drag begins.
+  geometry.current = { position, size: { width, height }, angle };
 
   return (
     <g className="edhandles">
@@ -508,26 +512,34 @@ function EditInput({
   );
 }
 
+/**
+ * The node body. It draws itself from the element's live `size` (rather than the
+ * constants it started at) so the hand-rolled resize handles have something to
+ * resize; JointJS applies the element's `angle` to the whole group for free.
+ */
 function EditorNode({ data }: Readonly<{ data: EditorData }>): ReactNode {
   const id = useCellId();
   const { magnetRef } = useMarkup();
   const { editingId, commit, cancel } = useEditor();
+  const { selectedId } = useSelection();
+  const { width, height } = useCell(selectElementSize);
   const isEditing = editingId === id;
 
   return (
     <g>
-      <rect className="ednode" width={NODE_W} height={NODE_H} rx={12} />
+      <rect className="ednode" width={width} height={height} rx={12} />
       {isEditing ? (
-        <foreignObject width={NODE_W} height={NODE_H}>
+        <foreignObject width={width} height={height}>
           <EditInput initial={data.label} onCommit={(value) => commit(id, value)} onCancel={cancel} />
         </foreignObject>
       ) : (
-        <text className="ednode__text" x={NODE_W / 2} y={NODE_H / 2} textAnchor="middle" dominantBaseline="central">
+        <text className="ednode__text" x={width / 2} y={height / 2} textAnchor="middle" dominantBaseline="central">
           {data.label}
         </text>
       )}
-      <circle ref={magnetRef('in')} className="edport" cx={0} cy={NODE_H / 2} r={7} />
-      <circle ref={magnetRef('out')} className="edport" cx={NODE_W} cy={NODE_H / 2} r={7} />
+      <circle ref={magnetRef('in')} className="edport" cx={0} cy={height / 2} r={7} />
+      <circle ref={magnetRef('out')} className="edport" cx={width} cy={height / 2} r={7} />
+      {selectedId === id && <TransformHandles data={data} width={width} height={height} />}
     </g>
   );
 }
@@ -588,7 +600,9 @@ function EditorStage(): ReactNode {
           </button>
         </div>
         <span className="hint">
-          Drag a port (◦) to another node to connect · double-click a node to rename · click to select
+          Drag a port (◦) to another node to connect · double-click a node to rename · drag a corner to
+          resize, the grip above to rotate (Shift = free angle) · handles are hand-rolled SVG, since
+          FreeTransform lives in <code>@joint/plus</code>
         </span>
       </div>
       <div className="stage__canvas">
@@ -615,7 +629,11 @@ function EditorStage(): ReactNode {
   );
 }
 
-/** Demo j — an interactive editor: connect by dragging ports, rename inline, undo/redo. */
+/**
+ * Demo j — an interactive editor: connect by dragging ports, rename inline,
+ * resize, rotate, undo/redo. Everything here is hand-rolled on the free stack —
+ * GoJS ships all four gestures as tools, React Flow ships the resizer only.
+ */
 export function EditorDemo(): ReactNode {
   return (
     <SelectionProvider>

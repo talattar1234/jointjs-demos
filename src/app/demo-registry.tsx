@@ -88,7 +88,7 @@ const DEMO_META: readonly DemoMeta[] = [
   { slug: 'd-code-select', tag: 'd', title: 'Select from code', tagline: 'Pick a shape by id or label from an input + button.' },
   { slug: 'e-add-remove', tag: 'e', title: 'Add & remove shapes', tagline: 'Mutate the graph incrementally without redrawing everything.' },
   { slug: 'f-datasets', tag: 'f', title: 'Switch datasets', tagline: 'Each button loads a different data set and refits the view.' },
-  { slug: 'j-editor', tag: 'j', title: 'Interactive editor', tagline: 'Drag to connect, rename inline, and undo/redo.' },
+  { slug: 'j-editor', tag: 'j', title: 'Interactive editor', tagline: 'Drag to connect, rename inline, resize, rotate, and undo/redo.' },
   { slug: 'bg-background', tag: 'bg', title: 'Background image', tagline: 'A map-style image underlay that stays aligned under zoom/pan.' },
 ];
 

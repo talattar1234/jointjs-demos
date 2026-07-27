@@ -1,13 +1,31 @@
-import { Link, Navigate, NavLink, Outlet, useParams } from 'react-router-dom';
+import { Link, Navigate, NavLink, Outlet, useMatch, useParams } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
-import { DEFAULT_DEMO_PATH, demoPath, findLibrary, LIBRARIES } from './demo-registry.tsx';
+import {
+  DEFAULT_DEMO_PATH,
+  demoPath,
+  findLibrary,
+  LIBRARIES,
+  type Library,
+} from './demo-registry.tsx';
 import { useTheme } from './theme.tsx';
+
+/**
+ * Keep the demo the user is looking at when they switch library tabs, so only the
+ * package changes. Falls back to the tab's default when it lacks that demo.
+ */
+function tabPath(library: Library, currentSlug: string | undefined): string {
+  const hasSameDemo = library.demos.some((demo) => demo.slug === currentSlug && demo.ready);
+  return demoPath(library.id, hasSameDemo && currentSlug !== undefined ? currentSlug : library.defaultSlug);
+}
 
 /** Persistent chrome: brand, library tabs, sidebar navigation, theme toggle. */
 export function AppShell(): ReactNode {
   const { theme, toggleTheme } = useTheme();
   const { lib } = useParams();
+  // `slug` lives on the child route, so it is not in this layout's own params.
+  const demoMatch = useMatch('/:lib/demo/:slug');
+  const currentSlug = demoMatch?.params.slug;
   const activeLibrary = findLibrary(lib);
 
   if (activeLibrary === undefined) {
@@ -30,7 +48,7 @@ export function AppShell(): ReactNode {
           {LIBRARIES.map((library) => (
             <Link
               key={library.id}
-              to={demoPath(library.id, library.defaultSlug)}
+              to={tabPath(library, currentSlug)}
               role="tab"
               aria-selected={library.id === activeLibrary.id}
               className={`libtab${library.id === activeLibrary.id ? ' libtab--active' : ''}`}
