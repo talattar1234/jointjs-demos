@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { ReactFlowProvider, useEdgesState, useNodesState, useReactFlow, type Edge, type Node } from '@xyflow/react';
 
+import { ChurnControls } from '../components/churn-controls.tsx';
 import { FlowCanvas } from './flow-canvas.tsx';
 import { SCALE_NODE_TYPES } from './flow-nodes.tsx';
 import { cellsToFlow } from './adapt.ts';
-import { buildScaleCells, type ScaleNodeData } from '../data/scale.ts';
+import { useChurnTicker } from '../hooks/use-churn-ticker.ts';
+import {
+  buildScaleCells,
+  churnCountPerTick,
+  churnHue,
+  isChurnIndex,
+  SCALE_CHURN_DEFAULT_HZ,
+  type ScaleNodeData,
+} from '../data/scale.ts';
 
 /**
  * React Flow renders nodes as real DOM elements (like JointJS' HTML boxes), so
@@ -44,6 +54,8 @@ function ScaleStage(): ReactNode {
   const [rendered, setRendered] = useState(0);
   const [isCullingEnabled, setIsCullingEnabled] = useState(true);
   const [areLabelsVisible, setAreLabelsVisible] = useState(true);
+  const [isChurnRunning, setIsChurnRunning] = useState(false);
+  const [churnHz, setChurnHz] = useState(SCALE_CHURN_DEFAULT_HZ);
   const didInit = useRef(false);
 
   const generate = useCallback(() => {
@@ -77,6 +89,34 @@ function ScaleStage(): ReactNode {
 
   const count = stats?.count ?? 0;
   const showWarning = count > RF_SCALE_WARN;
+
+  // React Flow keeps nodes in React state, so a tick is one `setNodes` that
+  // rebuilds the array — only the churned nodes get a fresh `data` object, the
+  // rest keep their identity so their memoized views don't re-render.
+  //
+  // `flushSync` forces the render+commit to happen inside the measured window.
+  // Without it the timer would only be timing how long it takes to *schedule*
+  // an update, which is the cheap half and would flatter this tab unfairly.
+  const applyChurn = useCallback(
+    (tick: number) => {
+      flushSync(() => {
+        setNodes((previous) =>
+          previous.map((node, index) =>
+            isChurnIndex(index, tick)
+              ? { ...node, data: { ...node.data, hue: churnHue(index, tick) } }
+              : node
+          )
+        );
+      });
+    },
+    [setNodes]
+  );
+
+  const { lastMs: churnMs } = useChurnTicker({
+    isRunning: isChurnRunning,
+    hz: churnHz,
+    apply: applyChurn,
+  });
 
   return (
     <div className="stage">
@@ -121,6 +161,15 @@ function ScaleStage(): ReactNode {
         >
           Labels: {areLabelsVisible ? 'on' : 'off'}
         </button>
+
+        <ChurnControls
+          isRunning={isChurnRunning}
+          onToggleRunning={() => setIsChurnRunning((running) => !running)}
+          hz={churnHz}
+          onHzChange={setChurnHz}
+          perTick={churnCountPerTick(count)}
+          lastMs={churnMs}
+        />
 
         <div className="chips">
           <span className="chip">

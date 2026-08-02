@@ -7,10 +7,18 @@ import {
 } from "react";
 import * as go from "gojs";
 
+import { ChurnControls } from "../components/churn-controls.tsx";
 import { GoCanvas } from "./go-canvas.tsx";
 import { cellsToGo } from "./adapt.ts";
 import { makeScaleNodeTemplate } from "./go-templates.ts";
-import { buildScaleCells } from "../data/scale.ts";
+import { useChurnTicker } from "../hooks/use-churn-ticker.ts";
+import {
+  buildScaleCells,
+  churnCountPerTick,
+  churnHue,
+  forEachChurnIndex,
+  SCALE_CHURN_DEFAULT_HZ,
+} from "../data/scale.ts";
 
 /**
  * GoJS paints to a single canvas, so it never pays the per-node DOM cost the
@@ -85,6 +93,8 @@ export function GoScaleDemo(): ReactNode {
   const [stats, setStats] = useState<Stats | null>(null);
   const [visible, setVisible] = useState(0);
   const [areLabelsVisible, setAreLabelsVisible] = useState(true);
+  const [isChurnRunning, setIsChurnRunning] = useState(false);
+  const [churnHz, setChurnHz] = useState(SCALE_CHURN_DEFAULT_HZ);
   const lastCountRef = useRef(0);
 
   const init = useCallback(initDiagram, []);
@@ -143,6 +153,30 @@ export function GoScaleDemo(): ReactNode {
     );
   }, [diagram, areLabelsVisible]);
 
+  // One `commit` per tick, named `null` so this high-frequency load never enters
+  // the undo stack. Writing through `Model.set` is what notifies the `fill`
+  // binding; assigning `data.hue` directly would change nothing on screen.
+  const applyChurn = useCallback(
+    (tick: number) => {
+      if (diagram === null) {
+        return;
+      }
+      const nodeData = diagram.model.nodeDataArray;
+      diagram.model.commit((model) => {
+        forEachChurnIndex(nodeData.length, tick, (index) => {
+          model.set(nodeData[index], "hue", churnHue(index, tick));
+        });
+      }, null);
+    },
+    [diagram],
+  );
+
+  const { lastMs: churnMs } = useChurnTicker({
+    isRunning: isChurnRunning,
+    hz: churnHz,
+    apply: applyChurn,
+  });
+
   const count = stats?.count ?? 0;
   const showWarning = count > GO_SCALE_WARN;
 
@@ -184,6 +218,15 @@ export function GoScaleDemo(): ReactNode {
         >
           Labels: {areLabelsVisible ? "on" : "off"}
         </button>
+
+        <ChurnControls
+          isRunning={isChurnRunning}
+          onToggleRunning={() => setIsChurnRunning((running) => !running)}
+          hz={churnHz}
+          onHzChange={setChurnHz}
+          perTick={churnCountPerTick(count)}
+          lastMs={churnMs}
+        />
 
         <div className="chips">
           <span className="chip">

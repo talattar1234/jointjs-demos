@@ -59,3 +59,67 @@ export function clampScaleCount(raw: string): number {
   }
   return Math.min(SCALE_MAX, parsed);
 }
+
+/* -------------------------------------------------------------------------- */
+/* Churn — a live "some shapes keep changing" load, shared by all three tabs.  */
+/* -------------------------------------------------------------------------- */
+
+/** Ticks per second the churn starts at. */
+export const SCALE_CHURN_DEFAULT_HZ = 1;
+/** Slowest / fastest tick rate the input accepts. */
+export const SCALE_CHURN_MIN_HZ = 0.1;
+export const SCALE_CHURN_MAX_HZ = 60;
+
+/**
+ * One in every `SCALE_CHURN_STRIDE` shapes is recolored per tick, so each shape
+ * changes once per that many ticks. Striding (rather than taking a contiguous
+ * slice) spreads the changed set across the whole field, so the churn is visible
+ * wherever the viewport happens to be — and the per-tick cost still grows with
+ * the total count, which is the thing being measured.
+ */
+export const SCALE_CHURN_STRIDE = 10;
+
+/** Hue rotation applied per tick — big enough that a change is unmistakable. */
+const CHURN_HUE_STEP = 61;
+
+/** Clamp raw Hz input to the supported tick-rate range. */
+export function clampChurnHz(raw: string): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < SCALE_CHURN_MIN_HZ) {
+    return SCALE_CHURN_MIN_HZ;
+  }
+  return Math.min(SCALE_CHURN_MAX_HZ, parsed);
+}
+
+/** How many shapes a single tick touches, for `count` total shapes. */
+export function churnCountPerTick(count: number): number {
+  return Math.ceil(count / SCALE_CHURN_STRIDE);
+}
+
+/**
+ * Hue for shape `index` on tick `tick`. Pure, so every tab lands on the same
+ * color for the same tick — the tabs stay comparable frame by frame.
+ */
+export function churnHue(index: number, tick: number): number {
+  return (index * GOLDEN_ANGLE + tick * CHURN_HUE_STEP) % 360;
+}
+
+/** Whether shape `index` is one of the ones tick `tick` recolors. */
+export function isChurnIndex(index: number, tick: number): boolean {
+  return index % SCALE_CHURN_STRIDE === tick % SCALE_CHURN_STRIDE;
+}
+
+/**
+ * Visit the shape indices this tick recolors. Kept as a callback so no
+ * intermediate array is allocated — at 200k shapes the tick runs 20k times a
+ * second in the worst case and allocation would dominate the measurement.
+ */
+export function forEachChurnIndex(
+  count: number,
+  tick: number,
+  visit: (index: number) => void
+): void {
+  for (let index = tick % SCALE_CHURN_STRIDE; index < count; index += SCALE_CHURN_STRIDE) {
+    visit(index);
+  }
+}

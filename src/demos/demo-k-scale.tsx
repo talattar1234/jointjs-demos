@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   GraphProvider,
   useGraph,
@@ -6,23 +12,30 @@ import {
   usePaper,
   type CellVisibility,
   type ElementPosition,
+  type ElementRecord,
   type ElementSize,
   type RenderElement,
-} from '@joint/react';
-import type { dia } from '@joint/core';
+} from "@joint/react";
+import type { dia } from "@joint/core";
 
-import { DiagramCanvas } from '../components/diagram-canvas.tsx';
+import { ChurnControls } from "../components/churn-controls.tsx";
+import { DiagramCanvas } from "../components/diagram-canvas.tsx";
+import { useChurnTicker } from "../hooks/use-churn-ticker.ts";
 import {
   buildScaleCells,
+  churnCountPerTick,
+  churnHue,
   clampScaleCount,
+  forEachChurnIndex,
   NODE_HEIGHT,
   NODE_WIDTH,
+  SCALE_CHURN_DEFAULT_HZ,
   SCALE_DEFAULT,
   SCALE_FIT_LIMIT,
   SCALE_MAX,
   SCALE_WARN,
   type ScaleNodeData,
-} from '../data/scale.ts';
+} from "../data/scale.ts";
 
 /** Extra margin (px, local) around the viewport so nodes render just before entering. */
 const CULL_MARGIN = 240;
@@ -64,15 +77,19 @@ function ScaleNode({ data }: Readonly<{ data: ScaleNodeData }>): ReactNode {
   );
 }
 
-const renderElement: RenderElement<ScaleNodeData> = (data) => <ScaleNode data={data} />;
+const renderElement: RenderElement<ScaleNodeData> = (data) => (
+  <ScaleNode data={data} />
+);
 
 /** Reports how many cell views are actually mounted in the DOM after each render pass. */
-function RenderStats({ onRendered }: Readonly<{ onRendered: (count: number) => void }>): ReactNode {
+function RenderStats({
+  onRendered,
+}: Readonly<{ onRendered: (count: number) => void }>): ReactNode {
   const { paper } = usePaper();
   useOnPaperEvents({
-    'render:done': () => {
+    "render:done": () => {
       if (paper !== null) {
-        onRendered(paper.el.querySelectorAll('.joint-cell').length);
+        onRendered(paper.el.querySelectorAll(".joint-cell").length);
       }
     },
   });
@@ -86,14 +103,19 @@ interface Stats {
 
 /** Controls + canvas for the scale test. Lives inside the GraphProvider. */
 function ScaleStage(): ReactNode {
-  const { resetCells } = useGraph();
+  const { resetCells, setCellData, transaction } =
+    useGraph<ElementRecord<ScaleNodeData>>();
   const [input, setInput] = useState(String(SCALE_DEFAULT));
   const [busy, setBusy] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const [rendered, setRendered] = useState(0);
   const [fitSignal, setFitSignal] = useState(0);
-  const [isCullingEnabled, setIsCullingEnabled] = useState(false);
+  // On by default: without it every cell mounts a view + React portal regardless
+  // of the viewport, so the cost scales with the total count instead of the screen.
+  const [isCullingEnabled, setIsCullingEnabled] = useState(true);
   const [areLabelsVisible, setAreLabelsVisible] = useState(true);
+  const [isChurnRunning, setIsChurnRunning] = useState(false);
+  const [churnHz, setChurnHz] = useState(SCALE_CHURN_DEFAULT_HZ);
   const didInit = useRef(false);
 
   // Viewport-culling cache. The inflated viewport is identical for every cell in
@@ -128,11 +150,16 @@ function ScaleStage(): ReactNode {
       if (bounds === null || !model.isElement()) {
         return true;
       }
-      const { x, y } = model.get('position') as ElementPosition;
-      const { width, height } = model.get('size') as ElementSize;
-      return x < bounds.maxX && x + width > bounds.minX && y < bounds.maxY && y + height > bounds.minY;
+      const { x, y } = model.get("position") as ElementPosition;
+      const { width, height } = model.get("size") as ElementSize;
+      return (
+        x < bounds.maxX &&
+        x + width > bounds.minX &&
+        y < bounds.maxY &&
+        y + height > bounds.minY
+      );
     },
-    [refreshBounds]
+    [refreshBounds],
   );
 
   const generate = useCallback(() => {
@@ -164,6 +191,33 @@ function ScaleStage(): ReactNode {
   const count = stats?.count ?? 0;
   const showWarning = count > SCALE_WARN;
 
+  // One transaction per tick: every `setCellData` inside it collapses into a
+  // single React update, and `deferPaint` holds the paper back so the whole
+  // batch repaints once. Without both, a tick would cost one render pass per
+  // changed cell.
+  const applyChurn = useCallback(
+    (tick: number) => {
+      transaction(
+        () => {
+          forEachChurnIndex(count, tick, (index) => {
+            setCellData(`n${index}`, (previous) => ({
+              ...previous,
+              hue: churnHue(index, tick),
+            }));
+          });
+        },
+        { deferPaint: true, name: "churn" },
+      );
+    },
+    [count, setCellData, transaction],
+  );
+
+  const { lastMs: churnMs } = useChurnTicker({
+    isRunning: isChurnRunning,
+    hz: churnHz,
+    apply: applyChurn,
+  });
+
   return (
     <div className="stage">
       <div className="toolbar">
@@ -178,35 +232,49 @@ function ScaleStage(): ReactNode {
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') {
+              if (event.key === "Enter") {
                 generate();
               }
             }}
           />
         </label>
-        <button type="button" className="btn btn--primary" onClick={generate} disabled={busy}>
-          {busy ? 'Generating…' : 'Generate'}
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={generate}
+          disabled={busy}
+        >
+          {busy ? "Generating…" : "Generate"}
         </button>
 
         <button
           type="button"
-          className={`btn ${isCullingEnabled ? 'btn--primary' : ''}`}
+          className={`btn ${isCullingEnabled ? "btn--primary" : ""}`}
           aria-pressed={isCullingEnabled}
           onClick={() => setIsCullingEnabled((enabled) => !enabled)}
           title="Render only shapes inside the viewport. Off = mount everything (slower)."
         >
-          Culling: {isCullingEnabled ? 'on' : 'off'}
+          Culling: {isCullingEnabled ? "on" : "off"}
         </button>
 
         <button
           type="button"
-          className={`btn ${areLabelsVisible ? 'btn--primary' : ''}`}
+          className={`btn ${areLabelsVisible ? "btn--primary" : ""}`}
           aria-pressed={areLabelsVisible}
           onClick={() => setAreLabelsVisible((visible) => !visible)}
           title="Show or hide the per-shape index label (CSS-only, no re-render)."
         >
-          Labels: {areLabelsVisible ? 'on' : 'off'}
+          Labels: {areLabelsVisible ? "on" : "off"}
         </button>
+
+        <ChurnControls
+          isRunning={isChurnRunning}
+          onToggleRunning={() => setIsChurnRunning((running) => !running)}
+          hz={churnHz}
+          onHzChange={setChurnHz}
+          perTick={churnCountPerTick(count)}
+          lastMs={churnMs}
+        />
 
         <div className="chips">
           <span className="chip">
@@ -225,19 +293,21 @@ function ScaleStage(): ReactNode {
         {isCullingEnabled ? (
           showWarning && (
             <span className="warn-pill" role="status">
-              Large graph — only the viewport is rendered. Zooming all the way out (Fit) draws
-              everything and may stutter.
+              Large graph — only the viewport is rendered. Zooming all the way
+              out (Fit) draws everything and may stutter.
             </span>
           )
         ) : (
           <span className="warn-pill" role="status">
-            Culling off — every shape is mounted regardless of the viewport. At high counts this can
-            freeze the tab.
+            Culling off — every shape is mounted regardless of the viewport. At
+            high counts this can freeze the tab.
           </span>
         )}
       </div>
 
-      <div className={`stage__canvas ${areLabelsVisible ? '' : 'labels-hidden'}`}>
+      <div
+        className={`stage__canvas ${areLabelsVisible ? "" : "labels-hidden"}`}
+      >
         <RenderStats onRendered={setRendered} />
         <DiagramCanvas<ScaleNodeData>
           renderElement={renderElement}
@@ -251,7 +321,10 @@ function ScaleStage(): ReactNode {
             // Shapes are read-only in the scale test: no element dragging.
             // (Panning still works on empty canvas; zoom still works.)
             interactive: false,
-            drawGrid: { name: 'mesh', args: { color: 'rgba(140,150,190,0.10)' } },
+            drawGrid: {
+              name: "mesh",
+              args: { color: "rgba(140,150,190,0.10)" },
+            },
             gridSize: 30,
           }}
         />

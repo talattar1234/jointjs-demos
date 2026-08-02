@@ -357,6 +357,10 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+.field__input--narrow {
+  width: 82px;
+}
+
 .field__input:focus {
   outline: 2px solid var(--accent);
   outline-offset: 0;
@@ -411,6 +415,17 @@ button {
 .chip b {
   color: var(--text);
   font-variant-numeric: tabular-nums;
+}
+
+/* A measurement that missed its budget (e.g. a churn tick slower than its interval). */
+.chip--warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 38%, transparent);
+}
+
+.chip--warn b {
+  color: var(--warn);
 }
 
 .warn-pill {
