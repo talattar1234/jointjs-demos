@@ -1,6 +1,7 @@
 import { Link, Navigate, NavLink, Outlet, useMatch, useParams } from 'react-router-dom';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
+import { CompareDialog } from './compare-dialog.tsx';
 import {
   DEFAULT_DEMO_PATH,
   demoPath,
@@ -22,6 +23,7 @@ function tabPath(library: Library, currentSlug: string | undefined): string {
 /** Persistent chrome: brand, library tabs, sidebar navigation, theme toggle. */
 export function AppShell(): ReactNode {
   const { theme, toggleTheme } = useTheme();
+  const [isComparisonOpen, setIsComparisonOpen] = useState(false);
   const { lib } = useParams();
   // `slug` lives on the child route, so it is not in this layout's own params.
   const demoMatch = useMatch('/:lib/demo/:slug');
@@ -77,14 +79,21 @@ export function AppShell(): ReactNode {
           ))}
         </nav>
 
-        <button type="button" className="theme-toggle" onClick={toggleTheme}>
-          {theme === 'dark' ? '☀ Light mode' : '☾ Dark mode'}
-        </button>
+        <div className="sidebar__actions">
+          <button type="button" className="theme-toggle compare-button" onClick={() => setIsComparisonOpen(true)}>
+            ⚖ Compare the three
+          </button>
+          <button type="button" className="theme-toggle" onClick={toggleTheme}>
+            {theme === 'dark' ? '☀ Light mode' : '☾ Dark mode'}
+          </button>
+        </div>
       </aside>
 
       <main className="content">
         <Outlet />
       </main>
+
+      {isComparisonOpen && <CompareDialog onClose={() => setIsComparisonOpen(false)} />}
     </div>
   );
 }
