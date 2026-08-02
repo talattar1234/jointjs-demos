@@ -1,14 +1,20 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type RefObject } from 'react';
-import { usePaper } from '@joint/react';
+import { usePaper, useOnGraphEvents } from '@joint/react';
 import type { dia } from '@joint/core';
 
 /** Zoom limits and step, kept as named constants rather than magic numbers. */
-const MIN_SCALE = 0.25;
+const DEFAULT_MIN_SCALE = 0.25;
 const MAX_SCALE = 2.5;
 const ZOOM_STEP = 1.2;
 const FIT_PADDING = 48;
 /** Cap used when framing a single element so we never zoom in absurdly close. */
 const ELEMENT_MAX_SCALE = 1.5;
+/**
+ * Hard floor for the content-aware minimum (see `getMinScale`). A graph that
+ * still does not fit here is past legibility, and letting the scale approach 0
+ * would make the transform math degenerate.
+ */
+const ABSOLUTE_MIN_SCALE = 0.02;
 
 interface Transform {
   readonly scale: number;
@@ -28,6 +34,8 @@ export interface ZoomPan {
   /** Value for the `<Paper transform>` prop: `translate(..px,..px) scale(..)`. */
   readonly transform: string;
   readonly scale: number;
+  /** Lowest scale currently reachable — lowered on graphs too big to fit at {@link DEFAULT_MIN_SCALE}. */
+  readonly minScale: number;
   readonly zoomIn: () => void;
   readonly zoomOut: () => void;
   /** Back to 100% at the origin. */
@@ -40,8 +48,16 @@ export interface ZoomPan {
   readonly panBy: (dx: number, dy: number) => void;
 }
 
-function clampScale(scale: number): number {
-  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
+function clampScale(scale: number, minScale: number): number {
+  return Math.min(MAX_SCALE, Math.max(minScale, scale));
+}
+
+/** Scale at which `bbox` fits inside a `viewport`-sized area, minus the fit padding. */
+function fitScaleFor(bbox: Rect, viewport: { readonly width: number; readonly height: number }): number {
+  return Math.min(
+    (viewport.width - FIT_PADDING * 2) / bbox.width,
+    (viewport.height - FIT_PADDING * 2) / bbox.height
+  );
 }
 
 /**
@@ -49,13 +65,69 @@ function clampScale(scale: number): number {
  * state (single source of truth) so mouse-wheel zoom, drag-pan, and the
  * programmatic controls in demo `h` all stay in sync. Wheel zooming is wired to
  * the passed container so it can `preventDefault` the page scroll.
+ *
+ * By default the zoom-out floor is content-aware: {@link DEFAULT_MIN_SCALE},
+ * lowered to the fit scale when the graph is too big to fit there. Pass
+ * `minScaleOverride` to pin it instead — for graphs so large that drawing every
+ * cell at once is not viable.
  * @param containerRef - the element that wraps the `<Paper>` and receives wheel events
+ * @param minScaleOverride - fixed zoom-out floor, replacing the content-aware one
  */
 const INITIAL_TRANSFORM: Transform = { scale: 1, tx: FIT_PADDING, ty: FIT_PADDING };
 
-export function useZoomPan(containerRef: RefObject<HTMLElement | null>): ZoomPan {
+export function useZoomPan(
+  containerRef: RefObject<HTMLElement | null>,
+  minScaleOverride?: number
+): ZoomPan {
   const { paper } = usePaper();
   const [transform, setTransform] = useState<Transform>(INITIAL_TRANSFORM);
+  const [minScale, setMinScale] = useState(DEFAULT_MIN_SCALE);
+
+  // Content extent in local units, cached because reading it walks every cell.
+  // Invalidated by the graph events below rather than recomputed per gesture.
+  const contentAreaRef = useRef<Rect | null>(null);
+  useOnGraphEvents({
+    add: () => (contentAreaRef.current = null),
+    remove: () => (contentAreaRef.current = null),
+    reset: () => (contentAreaRef.current = null),
+    'change:position': () => (contentAreaRef.current = null),
+    'change:size': () => (contentAreaRef.current = null),
+  });
+
+  // `useModelGeometry` is essential: the default reads the rendered SVG, which
+  // under viewport culling is only the handful of mounted views — fitting to
+  // that frames a corner of a large graph and calls it the whole thing.
+  const readContentArea = useCallback((): Rect | null => {
+    if (paper === null) {
+      return null;
+    }
+    if (contentAreaRef.current === null) {
+      const area = paper.getContentArea({ useModelGeometry: true });
+      contentAreaRef.current = area.width > 0 && area.height > 0 ? area : null;
+    }
+    return contentAreaRef.current;
+  }, [paper]);
+
+  /**
+   * Lowest scale the user may zoom out to. Normally {@link DEFAULT_MIN_SCALE},
+   * but a graph too large to fit at that scale lowers the floor to exactly its
+   * fit scale — so "zoom all the way out" always ends up showing everything.
+   */
+  const getMinScale = useCallback((): number => {
+    if (minScaleOverride !== undefined) {
+      return minScaleOverride;
+    }
+    const bbox = readContentArea();
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (bbox === null || rect === undefined) {
+      return DEFAULT_MIN_SCALE;
+    }
+    const fitScale = fitScaleFor(bbox, rect);
+    if (!Number.isFinite(fitScale) || fitScale >= DEFAULT_MIN_SCALE) {
+      return DEFAULT_MIN_SCALE;
+    }
+    return Math.max(ABSOLUTE_MIN_SCALE, fitScale);
+  }, [containerRef, minScaleOverride, readContentArea]);
 
   // `transformRef` is the live source of truth; continuous gestures (wheel/drag)
   // accumulate into it and commit to React state at most once per animation
@@ -84,15 +156,32 @@ export function useZoomPan(containerRef: RefObject<HTMLElement | null>): ZoomPan
     [flush]
   );
 
+  /**
+   * Floor to clamp a move to `desired` against, published so the toolbar can
+   * reflect it. Reading the content extent walks every cell, so it is only
+   * consulted when the move actually wants to go below the default floor —
+   * ordinary zooming never pays for it.
+   */
+  const resolveMinScale = useCallback(
+    (desired: number): number => {
+      const isDefaultEnough = minScaleOverride === undefined && desired >= DEFAULT_MIN_SCALE;
+      const value = isDefaultEnough ? DEFAULT_MIN_SCALE : getMinScale();
+      setMinScale(value);
+      return value;
+    },
+    [getMinScale, minScaleOverride]
+  );
+
   const zoomAtPoint = useCallback(
     (factor: number, px: number, py: number, immediate: boolean) => {
+      const floor = resolveMinScale(transformRef.current.scale * factor);
       apply((prev) => {
-        const scale = clampScale(prev.scale * factor);
+        const scale = clampScale(prev.scale * factor, floor);
         const ratio = scale / prev.scale;
         return { scale, tx: px - ratio * (px - prev.tx), ty: py - ratio * (py - prev.ty) };
       }, immediate);
     },
-    [apply]
+    [apply, resolveMinScale]
   );
 
   const zoomAtCenter = useCallback(
@@ -119,11 +208,8 @@ export function useZoomPan(containerRef: RefObject<HTMLElement | null>): ZoomPan
       if (rect === undefined || bbox.width <= 0 || bbox.height <= 0) {
         return;
       }
-      const fitScale = Math.min(
-        (rect.width - FIT_PADDING * 2) / bbox.width,
-        (rect.height - FIT_PADDING * 2) / bbox.height
-      );
-      const scale = Math.min(clampScale(fitScale), maxScale);
+      const fitScale = fitScaleFor(bbox, rect);
+      const scale = Math.min(clampScale(fitScale, resolveMinScale(fitScale)), maxScale);
       apply(
         () => ({
           scale,
@@ -133,15 +219,16 @@ export function useZoomPan(containerRef: RefObject<HTMLElement | null>): ZoomPan
         true
       );
     },
-    [apply, containerRef]
+    [apply, containerRef, resolveMinScale]
   );
 
   const fitContent = useCallback(() => {
-    if (paper === null) {
+    const bbox = readContentArea();
+    if (bbox === null) {
       return;
     }
-    fitBBox(paper.getContentArea(), MAX_SCALE);
-  }, [paper, fitBBox]);
+    fitBBox(bbox, MAX_SCALE);
+  }, [readContentArea, fitBBox]);
 
   const zoomToElement = useCallback(
     (id: dia.Cell.ID) => {
@@ -184,11 +271,25 @@ export function useZoomPan(containerRef: RefObject<HTMLElement | null>): ZoomPan
   }, []);
 
   const transformString = `translate(${transform.tx}px, ${transform.ty}px) scale(${transform.scale})`;
-  return { transform: transformString, scale: transform.scale, zoomIn, zoomOut, reset, fitContent, zoomToElement, panBy };
+  return {
+    transform: transformString,
+    scale: transform.scale,
+    minScale,
+    zoomIn,
+    zoomOut,
+    reset,
+    fitContent,
+    zoomToElement,
+    panBy,
+  };
 }
 
-/** Re-exported so demos can label their zoom buttons consistently. */
-export const ZOOM_BOUNDS = { min: MIN_SCALE, max: MAX_SCALE } as const;
+/**
+ * Re-exported so demos can label their zoom buttons consistently. `min` is the
+ * default floor; {@link ZoomPan.minScale} reports the live one, which drops
+ * below this for graphs too large to fit at 25%.
+ */
+export const ZOOM_BOUNDS = { min: DEFAULT_MIN_SCALE, max: MAX_SCALE } as const;
 
 /**
  * Context that exposes the canvas's {@link ZoomPan} API to overlay children, so

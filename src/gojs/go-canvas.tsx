@@ -4,13 +4,16 @@ import * as go from 'gojs';
 import { useTheme } from '../app/theme.tsx';
 import { applyThemes } from './go-theme.ts';
 
-/** Zoom bounds mirroring the React Flow tab, so the tabs feel the same. */
-const MIN_SCALE = 0.2;
-const MAX_SCALE = 2.5;
+/**
+ * Zoom bounds mirroring the React Flow tab, so the tabs feel the same. `min` is
+ * only the default: a demo may lower `diagram.minScale` when its graph is too
+ * large to fit at 20% (see `go-k-scale`).
+ */
+export const GO_ZOOM_BOUNDS = { min: 0.2, max: 2.5 } as const;
 /** Grid spacing, matching the React Flow `<Background gap={18} />`. */
 const GRID_STEP = 18;
-/** Slack left around the content when fitting. */
-const FIT_PADDING = 24;
+/** Slack left around the content when fitting. Exported so demos can mirror `zoomToFit`. */
+export const GO_FIT_PADDING = 24;
 
 interface GoCanvasProps {
   /**
@@ -70,9 +73,9 @@ export function GoCanvas({
       'toolManager.hoverDelay': 250,
       initialAutoScale: go.AutoScale.Uniform,
       initialContentAlignment: go.Spot.Center,
-      padding: new go.Margin(FIT_PADDING),
-      minScale: MIN_SCALE,
-      maxScale: MAX_SCALE,
+      padding: new go.Margin(GO_FIT_PADDING),
+      minScale: GO_ZOOM_BOUNDS.min,
+      maxScale: GO_ZOOM_BOUNDS.max,
       grid: new go.Panel('Grid', { gridCellSize: new go.Size(GRID_STEP, GRID_STEP) }).add(
         new go.Shape('LineH', { strokeWidth: 1 }).theme('stroke', 'gridMinor'),
         new go.Shape('LineV', { strokeWidth: 1 }).theme('stroke', 'gridMinor')

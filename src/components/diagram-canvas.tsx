@@ -31,6 +31,12 @@ interface DiagramCanvasProps<TElement, TLink> {
   readonly selectedId?: dia.Cell.ID | null;
   /** Bump this counter to re-fit the viewport to content (e.g. after loading). */
   readonly fitSignal?: number;
+  /**
+   * Pin the zoom-out floor. By default it is content-aware — it drops to the
+   * fit scale for graphs too large to fit at 25%. Set this when the graph is too
+   * large to draw in full and framing it all would lock the tab.
+   */
+  readonly minScale?: number;
 }
 
 /**
@@ -47,9 +53,10 @@ export function DiagramCanvas<TElement = unknown, TLink = unknown>({
   fitOnMount = true,
   selectedId,
   fitSignal,
+  minScale,
 }: Readonly<DiagramCanvasProps<TElement, TLink>>): ReactNode {
   const containerRef = useRef<HTMLDivElement>(null);
-  const zoom = useZoomPan(containerRef);
+  const zoom = useZoomPan(containerRef, minScale);
   const panOrigin = useRef<{ x: number; y: number } | null>(null);
   const hasFitted = useRef(false);
 

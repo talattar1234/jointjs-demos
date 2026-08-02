@@ -26,6 +26,13 @@ interface FlowCanvasProps<NodeType extends Node, EdgeType extends Edge>
 const PRO_OPTIONS = { hideAttribution: true } as const;
 
 /**
+ * Default zoom bounds, mirroring the JointJS and GoJS tabs. `min` is only a
+ * default: a demo may pass a lower `minZoom` when its graph is too large to fit
+ * at 20% (see `flow-k-scale`).
+ */
+export const FLOW_ZOOM_BOUNDS = { min: 0.2, max: 2.5 } as const;
+
+/**
  * The React Flow analogue of `DiagramCanvas`: a themed `<ReactFlow>` framed by
  * the shared `.canvas` chrome, with dotted background, zoom controls, and the
  * floating edge type wired in. Generic over the node/edge types so each demo's
@@ -43,8 +50,8 @@ export function FlowCanvas<NodeType extends Node = Node, EdgeType extends Edge =
     <div className="canvas rf-canvas">
       {underlay}
       <ReactFlow<NodeType, EdgeType>
-        minZoom={0.2}
-        maxZoom={2.5}
+        minZoom={FLOW_ZOOM_BOUNDS.min}
+        maxZoom={FLOW_ZOOM_BOUNDS.max}
         fitView
         proOptions={PRO_OPTIONS}
         {...flowProps}

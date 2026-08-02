@@ -6,8 +6,18 @@ export const SCALE_DEFAULT = 100;
 export const SCALE_MAX = 200_000;
 /** Above this, we show a "large graph" warning about fully rendering. */
 export const SCALE_WARN = 20_000;
-/** Only auto-fit the whole field for counts small enough to render at once. */
-export const SCALE_FIT_LIMIT = 4_000;
+/**
+ * Only auto-fit after generating when the field is small enough to draw at once.
+ * Fitting puts every shape on screen, which defeats viewport culling by
+ * definition — past this count the user opts in via the Fit button instead.
+ */
+export const SCALE_FIT_LIMIT = SCALE_WARN;
+/**
+ * Below this zoom the per-shape index labels are a few pixels tall and unreadable,
+ * so every tab drops them (level of detail). Text is the expensive part of these
+ * nodes, and this is exactly the range where the whole field is on screen.
+ */
+export const SCALE_LABEL_LOD_SCALE = 0.5;
 
 /** Fixed node geometry, shared by the generator and the renderer. */
 export const NODE_WIDTH = 44;
@@ -26,13 +36,41 @@ export interface ScaleNodeData {
 
 const GOLDEN_ANGLE = 137.508;
 
+/** Columns in the roughly 16:9 grid `count` shapes are laid out on. */
+function scaleColumns(count: number): number {
+  return Math.max(1, Math.round(Math.sqrt((count * 16) / 9)));
+}
+
+/** Width/height of the generated field, in local units. */
+export interface ScaleContentSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Extent of the field {@link buildScaleCells} produces, without building it.
+ * Each tab uses this to work out how far it must be able to zoom out before the
+ * whole graph fits — the cells themselves are far too many to measure per frame.
+ */
+export function scaleContentSize(count: number): ScaleContentSize {
+  if (count < 1) {
+    return { width: 0, height: 0 };
+  }
+  const columns = Math.min(count, scaleColumns(count));
+  const rows = Math.ceil(count / columns);
+  return {
+    width: (columns - 1) * GAP_X + NODE_WIDTH,
+    height: (rows - 1) * GAP_Y + NODE_HEIGHT,
+  };
+}
+
 /**
  * Build `count` element records laid out on a roughly 16:9 grid. Pure data —
  * no views are created here; the paper virtualizes rendering via
  * `cellVisibility`, so only on-screen nodes ever become React views.
  */
 export function buildScaleCells(count: number): CellRecord<ScaleNodeData>[] {
-  const columns = Math.max(1, Math.round(Math.sqrt((count * 16) / 9)));
+  const columns = scaleColumns(count);
   const cells: CellRecord<ScaleNodeData>[] = new Array(count);
 
   for (let index = 0; index < count; index += 1) {

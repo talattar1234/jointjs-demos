@@ -8,7 +8,7 @@ import {
 import * as go from "gojs";
 
 import { ChurnControls } from "../components/churn-controls.tsx";
-import { GoCanvas } from "./go-canvas.tsx";
+import { GoCanvas, GO_FIT_PADDING, GO_ZOOM_BOUNDS } from "./go-canvas.tsx";
 import { cellsToGo } from "./adapt.ts";
 import { makeScaleNodeTemplate } from "./go-templates.ts";
 import { useChurnTicker } from "../hooks/use-churn-ticker.ts";
@@ -17,7 +17,9 @@ import {
   churnCountPerTick,
   churnHue,
   forEachChurnIndex,
+  scaleContentSize,
   SCALE_CHURN_DEFAULT_HZ,
+  SCALE_LABEL_LOD_SCALE,
 } from "../data/scale.ts";
 
 /**
@@ -29,7 +31,14 @@ import {
 const GO_SCALE_DEFAULT = 400;
 const GO_SCALE_MAX = 100_000;
 const GO_SCALE_WARN = 10_000;
-const GO_SCALE_FIT_LIMIT = 5_000;
+/**
+ * Only auto-fit after generating when the field is small enough to paint at once
+ * — fitting puts every shape in the viewport. Past this the user opts in via the
+ * Fit button.
+ */
+const GO_SCALE_FIT_LIMIT = GO_SCALE_WARN;
+/** Hard floor for the content-aware `minScale` below. */
+const GO_ABSOLUTE_MIN_SCALE = 0.02;
 /** Throttle for recounting what's inside the viewport while panning. */
 const COUNT_THROTTLE_MS = 250;
 
@@ -48,6 +57,35 @@ function buildModel(count: number, showLabels: boolean): go.GraphLinksModel {
     linkKeyProperty: "key",
     modelData: { showLabels },
   });
+}
+
+/**
+ * Lower `diagram.minScale` for a field of `count` shapes that cannot fit at the
+ * default floor, so zooming all the way out (and `zoomToFit`, which clamps to
+ * `minScale` too) can actually reach the whole graph.
+ *
+ * Sized from {@link scaleContentSize} rather than `documentBounds`, which GoJS
+ * only recomputes on its next layout pass — this runs right after the model swap.
+ */
+function applyMinScale(diagram: go.Diagram, count: number): void {
+  const host = diagram.div;
+  const content = scaleContentSize(count);
+  if (host === null || content.width <= 0 || content.height <= 0) {
+    return;
+  }
+  const fitScale = Math.min(
+    (host.clientWidth - GO_FIT_PADDING * 2) / content.width,
+    (host.clientHeight - GO_FIT_PADDING * 2) / content.height,
+  );
+  const next =
+    Number.isFinite(fitScale) && fitScale < GO_ZOOM_BOUNDS.min
+      ? Math.max(GO_ABSOLUTE_MIN_SCALE, fitScale)
+      : GO_ZOOM_BOUNDS.min;
+  // Assigning `minScale` invalidates the viewport until the next draw, so skip
+  // the write when nothing changes — otherwise every mount pays for it.
+  if (diagram.minScale !== next) {
+    diagram.minScale = next;
+  }
 }
 
 function initDiagram(diagram: go.Diagram): void {
@@ -69,6 +107,12 @@ interface Stats {
 /** How many nodes currently overlap the viewport — GoJS's painted subset. */
 function countInViewport(diagram: go.Diagram): number {
   const viewport = diagram.viewportBounds;
+  // Between a model swap (or a `minScale` write) and the next draw GoJS leaves
+  // the viewport non-real; intersecting against it throws. The following
+  // `ViewportBoundsChanged` re-runs this with a real rect.
+  if (!viewport.isReal()) {
+    return 0;
+  }
   let visible = 0;
   const nodes = diagram.nodes;
   while (nodes.next()) {
@@ -93,11 +137,34 @@ export function GoScaleDemo(): ReactNode {
   const [stats, setStats] = useState<Stats | null>(null);
   const [visible, setVisible] = useState(0);
   const [areLabelsVisible, setAreLabelsVisible] = useState(true);
+  const [isLabelLodActive, setIsLabelLodActive] = useState(false);
   const [isChurnRunning, setIsChurnRunning] = useState(false);
   const [churnHz, setChurnHz] = useState(SCALE_CHURN_DEFAULT_HZ);
   const lastCountRef = useRef(0);
 
+  // Read inside the diagram listener below, which is subscribed once.
+  const areLabelsVisibleRef = useRef(areLabelsVisible);
+  areLabelsVisibleRef.current = areLabelsVisible;
+
   const init = useCallback(initDiagram, []);
+
+  /**
+   * Push the effective label visibility — the button's choice, minus the
+   * level-of-detail cutoff — into `modelData`. One shared-model write fans out
+   * to every label, and the no-op guard keeps it off the per-frame path.
+   */
+  const syncLabels = useCallback((target: go.Diagram) => {
+    const isLod = target.scale < SCALE_LABEL_LOD_SCALE;
+    setIsLabelLodActive(isLod);
+    const next = areLabelsVisibleRef.current && !isLod;
+    const { modelData } = target.model;
+    if (modelData.showLabels !== next) {
+      target.model.commit(
+        (model) => model.set(modelData, "showLabels", next),
+        null,
+      );
+    }
+  }, []);
 
   const generate = useCallback(() => {
     if (diagram === null) {
@@ -113,12 +180,14 @@ export function GoScaleDemo(): ReactNode {
       const buildMs = performance.now() - start;
       setStats({ count, buildMs });
       setBusy(false);
+      applyMinScale(diagram, count);
       if (count <= GO_SCALE_FIT_LIMIT) {
         diagram.zoomToFit();
       }
+      syncLabels(diagram);
       setVisible(countInViewport(diagram));
     }, 20);
-  }, [diagram, input, areLabelsVisible]);
+  }, [diagram, input, areLabelsVisible, syncLabels]);
 
   // Seed the first measurement and keep it fresh as the viewport moves.
   useEffect(() => {
@@ -126,19 +195,23 @@ export function GoScaleDemo(): ReactNode {
       return;
     }
     const onViewport = (): void => {
+      // Cheap and needs to track every zoom step, so it runs unthrottled.
+      syncLabels(diagram);
       const now = performance.now();
       if (now - lastCountRef.current > COUNT_THROTTLE_MS) {
         lastCountRef.current = now;
         setVisible(countInViewport(diagram));
       }
     };
-    setStats({ count: diagram.model.nodeDataArray.length, buildMs: 0 });
+    const initialCount = diagram.model.nodeDataArray.length;
+    setStats({ count: initialCount, buildMs: 0 });
+    applyMinScale(diagram, initialCount);
     setVisible(countInViewport(diagram));
     diagram.addDiagramListener("ViewportBoundsChanged", onViewport);
     return () => {
       diagram.removeDiagramListener("ViewportBoundsChanged", onViewport);
     };
-  }, [diagram]);
+  }, [diagram, syncLabels]);
 
   const toggleLabels = useCallback(() => {
     if (diagram === null) {
@@ -146,12 +219,9 @@ export function GoScaleDemo(): ReactNode {
     }
     const next = !areLabelsVisible;
     setAreLabelsVisible(next);
-    // One shared-model write; `bindModel` fans it out to every label.
-    diagram.model.commit(
-      (model) => model.set(model.modelData, "showLabels", next),
-      null,
-    );
-  }, [diagram, areLabelsVisible]);
+    areLabelsVisibleRef.current = next;
+    syncLabels(diagram);
+  }, [diagram, areLabelsVisible, syncLabels]);
 
   // One `commit` per tick, named `null` so this high-frequency load never enters
   // the undo stack. Writing through `Model.set` is what notifies the `fill`
@@ -214,9 +284,10 @@ export function GoScaleDemo(): ReactNode {
           className={`btn ${areLabelsVisible ? "btn--primary" : ""}`}
           aria-pressed={areLabelsVisible}
           onClick={toggleLabels}
-          title="Show or hide the per-shape index label (one shared-model write)."
+          title={`Show or hide the per-shape index label (one shared-model write). Dropped automatically below ${SCALE_LABEL_LOD_SCALE * 100}% zoom.`}
         >
-          Labels: {areLabelsVisible ? "on" : "off"}
+          Labels:{" "}
+          {areLabelsVisible ? (isLabelLodActive ? "auto-off" : "on") : "off"}
         </button>
 
         <ChurnControls

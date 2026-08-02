@@ -21,6 +21,7 @@ import type { dia } from "@joint/core";
 import { ChurnControls } from "../components/churn-controls.tsx";
 import { DiagramCanvas } from "../components/diagram-canvas.tsx";
 import { useChurnTicker } from "../hooks/use-churn-ticker.ts";
+import { useZoomPanControls, ZOOM_BOUNDS } from "../hooks/use-zoom-pan.ts";
 import {
   buildScaleCells,
   churnCountPerTick,
@@ -32,6 +33,7 @@ import {
   SCALE_CHURN_DEFAULT_HZ,
   SCALE_DEFAULT,
   SCALE_FIT_LIMIT,
+  SCALE_LABEL_LOD_SCALE,
   SCALE_MAX,
   SCALE_WARN,
   type ScaleNodeData,
@@ -81,6 +83,20 @@ const renderElement: RenderElement<ScaleNodeData> = (data) => (
   <ScaleNode data={data} />
 );
 
+/**
+ * Reports the canvas's live zoom back up to the stage. Must be mounted as a
+ * child of {@link DiagramCanvas} — that is where the zoom context is provided.
+ */
+function ScaleWatcher({
+  onScaleChange,
+}: Readonly<{ onScaleChange: (scale: number) => void }>): ReactNode {
+  const { scale } = useZoomPanControls();
+  useEffect(() => {
+    onScaleChange(scale);
+  }, [scale, onScaleChange]);
+  return null;
+}
+
 /** Reports how many cell views are actually mounted in the DOM after each render pass. */
 function RenderStats({
   onRendered,
@@ -114,6 +130,7 @@ function ScaleStage(): ReactNode {
   // of the viewport, so the cost scales with the total count instead of the screen.
   const [isCullingEnabled, setIsCullingEnabled] = useState(true);
   const [areLabelsVisible, setAreLabelsVisible] = useState(true);
+  const [viewScale, setViewScale] = useState(1);
   const [isChurnRunning, setIsChurnRunning] = useState(false);
   const [churnHz, setChurnHz] = useState(SCALE_CHURN_DEFAULT_HZ);
   const didInit = useRef(false);
@@ -190,6 +207,10 @@ function ScaleStage(): ReactNode {
 
   const count = stats?.count ?? 0;
   const showWarning = count > SCALE_WARN;
+  // Level of detail: once the whole field is on screen the labels are sub-pixel
+  // noise, and painting 10k text nodes is what makes that zoom level crawl.
+  const isLabelLodActive = viewScale < SCALE_LABEL_LOD_SCALE;
+  const areLabelsDrawn = areLabelsVisible && !isLabelLodActive;
 
   // One transaction per tick: every `setCellData` inside it collapses into a
   // single React update, and `deferPaint` holds the paper back so the whole
@@ -262,9 +283,10 @@ function ScaleStage(): ReactNode {
           className={`btn ${areLabelsVisible ? "btn--primary" : ""}`}
           aria-pressed={areLabelsVisible}
           onClick={() => setAreLabelsVisible((visible) => !visible)}
-          title="Show or hide the per-shape index label (CSS-only, no re-render)."
+          title={`Show or hide the per-shape index label (CSS-only, no re-render). Dropped automatically below ${SCALE_LABEL_LOD_SCALE * 100}% zoom.`}
         >
-          Labels: {areLabelsVisible ? "on" : "off"}
+          Labels:{" "}
+          {areLabelsVisible ? (isLabelLodActive ? "auto-off" : "on") : "off"}
         </button>
 
         <ChurnControls
@@ -293,8 +315,10 @@ function ScaleStage(): ReactNode {
         {isCullingEnabled ? (
           showWarning && (
             <span className="warn-pill" role="status">
-              Large graph — only the viewport is rendered. Zooming all the way
-              out (Fit) draws everything and may stutter.
+              Large graph — above {SCALE_WARN.toLocaleString()} shapes the field
+              is too big to draw at once, so zoom-out stops at{" "}
+              {ZOOM_BOUNDS.min * 100}% and you pan to explore. Below it, Fit
+              frames everything.
             </span>
           )
         ) : (
@@ -305,14 +329,16 @@ function ScaleStage(): ReactNode {
         )}
       </div>
 
-      <div
-        className={`stage__canvas ${areLabelsVisible ? "" : "labels-hidden"}`}
-      >
+      <div className={`stage__canvas ${areLabelsDrawn ? "" : "labels-hidden"}`}>
         <RenderStats onRendered={setRendered} />
         <DiagramCanvas<ScaleNodeData>
           renderElement={renderElement}
           fitOnMount={false}
           fitSignal={fitSignal}
+          // Below the warn threshold the whole field can be drawn, so zoom-out
+          // is allowed to reach fit. Above it, framing everything would mount a
+          // view per shape and lock the tab — keep the ordinary floor and pan.
+          minScale={showWarning ? ZOOM_BOUNDS.min : undefined}
           paperProps={{
             cellVisibility: isCullingEnabled ? cellVisibility : undefined,
             // Recompute cached viewport bounds only when the viewport actually moved.
@@ -327,7 +353,9 @@ function ScaleStage(): ReactNode {
             },
             gridSize: 30,
           }}
-        />
+        >
+          <ScaleWatcher onScaleChange={setViewScale} />
+        </DiagramCanvas>
       </div>
     </div>
   );

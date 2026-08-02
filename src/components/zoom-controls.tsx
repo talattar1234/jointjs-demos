@@ -10,14 +10,26 @@ interface ZoomControlsProps {
   readonly hasSelection?: boolean;
 }
 
+/** Slack on the floor comparison so float drift doesn't leave the button live at the limit. */
+const SCALE_EPSILON = 1.001;
+
 /** Floating zoom toolbar rendered over a {@link DiagramCanvas}. */
 export function ZoomControls({ zoom, onZoomToSelected, hasSelection }: Readonly<ZoomControlsProps>): ReactNode {
+  const isAtMinScale = zoom.scale <= zoom.minScale * SCALE_EPSILON;
+
   return (
     <div className="zoom-controls" role="group" aria-label="Zoom controls">
       <button type="button" className="zoom-btn" onClick={zoom.zoomIn} aria-label="Zoom in" title="Zoom in">
         +
       </button>
-      <button type="button" className="zoom-btn" onClick={zoom.zoomOut} aria-label="Zoom out" title="Zoom out">
+      <button
+        type="button"
+        className="zoom-btn"
+        onClick={zoom.zoomOut}
+        disabled={isAtMinScale}
+        aria-label="Zoom out"
+        title={isAtMinScale ? 'Zoomed all the way out' : 'Zoom out'}
+      >
         −
       </button>
       <div className="zoom-level" aria-live="polite">
